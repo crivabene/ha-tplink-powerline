@@ -1,0 +1,94 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "description": "Adres i hasło interfejsu WWW adaptera sieciowego TP-Link G.hn (powerline). Każdy adapter dodaje się osobno.",
+        "data": {
+          "host": "Host",
+          "password": "Hasło"
+        },
+        "data_description": {
+          "host": "Adres IP lub nazwa hosta adaptera, np. 192.168.0.100",
+          "password": "Hasło strony WWW adaptera (nie TP-Link ID)"
+        }
+      },
+      "reauth_confirm": {
+        "description": "Adapter {host} nie akceptuje już hasła. Wpisz aktualne. Kilka błędnych haseł z rzędu blokuje jego interfejs WWW na pewien czas.",
+        "data": {
+          "password": "Hasło"
+        }
+      },
+      "reconfigure": {
+        "description": "Zmień adres lub hasło tego adaptera.",
+        "data": {
+          "host": "Host",
+          "password": "Hasło"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Adapter odrzucił hasło. Kilka błędnych haseł z rzędu blokuje jego interfejs WWW na pewien czas.",
+      "cannot_connect": "Pod tym adresem nie ma obsługiwanego adaptera TP-Link powerline.",
+      "unknown": "Nieoczekiwana odpowiedź adaptera. Włącz logowanie debugowania i zgłoś problem.",
+      "busy": "Ktoś jest zalogowany na stronie WWW adaptera: wyloguj się tam i spróbuj ponownie.",
+      "locked": "Strona WWW adaptera jest zablokowana po zbyt wielu błędnych hasłach. Odczekaj kilka minut i spróbuj ponownie."
+    },
+    "abort": {
+      "already_configured": "Ten adapter jest już skonfigurowany.",
+      "reauth_successful": "Hasło zaktualizowane.",
+      "reconfigure_successful": "Adapter zaktualizowany.",
+      "wrong_device": "Ten adres należy do innego adaptera."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "powerline": {
+        "name": "Połączenie powerline"
+      },
+      "ethernet": {
+        "name": "Ethernet"
+      },
+      "ethernet_port": {
+        "name": "Port Ethernet {port}"
+      }
+    },
+    "button": {
+      "restart": {
+        "name": "Uruchom ponownie"
+      }
+    },
+    "sensor": {
+      "peer_rx": {
+        "name": "Prędkość odbioru od {peer}"
+      },
+      "peer_tx": {
+        "name": "Prędkość nadawania do {peer}"
+      },
+      "adapters": {
+        "name": "Połączone adaptery"
+      },
+      "wifi_clients": {
+        "name": "Klienci Wi-Fi"
+      }
+    },
+    "switch": {
+      "led": {
+        "name": "Diody LED"
+      },
+      "wifi_2g": {
+        "name": "Wi-Fi 2,4 GHz"
+      },
+      "wifi_5g": {
+        "name": "Wi-Fi 5 GHz"
+      }
+    }
+  },
+  "exceptions": {
+    "command_failed": {
+      "message": "Adapter nie przyjął polecenia: {error}"
+    },
+    "auth_failed": {
+      "message": "Adapter odrzucił hasło: wpisz aktualne w prośbie o ponowne uwierzytelnienie."
+    }
+  }
+}

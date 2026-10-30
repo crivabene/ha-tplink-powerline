@@ -1,0 +1,94 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "description": "Indirizzo e password dell'interfaccia web di un adattatore powerline TP-Link G.hn. Ogni adattatore si aggiunge separatamente.",
+        "data": {
+          "host": "Host",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "Indirizzo IP o nome dell'adattatore, ad es. 192.168.0.100",
+          "password": "La password della pagina web dell'adattatore (non il TP-Link ID)"
+        }
+      },
+      "reauth_confirm": {
+        "description": "L'adattatore {host} non accetta più la password. Inserisci quella attuale. Più password errate di fila bloccano la sua interfaccia web per un po'.",
+        "data": {
+          "password": "Password"
+        }
+      },
+      "reconfigure": {
+        "description": "Cambia l'indirizzo o la password di questo adattatore.",
+        "data": {
+          "host": "Host",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "L'adattatore ha rifiutato la password. Più password errate di fila bloccano la sua interfaccia web per un po'.",
+      "cannot_connect": "Nessun adattatore powerline TP-Link supportato raggiungibile a questo indirizzo.",
+      "unknown": "Risposta inattesa dall'adattatore. Attiva il log di debug e apri una segnalazione.",
+      "busy": "Qualcuno è collegato alla pagina web dell'adattatore: esci da lì e riprova.",
+      "locked": "La pagina web dell'adattatore è bloccata dopo troppe password errate. Attendi qualche minuto e riprova."
+    },
+    "abort": {
+      "already_configured": "Questo adattatore è già configurato.",
+      "reauth_successful": "Password aggiornata.",
+      "reconfigure_successful": "Adattatore aggiornato.",
+      "wrong_device": "Questo indirizzo appartiene a un altro adattatore."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "powerline": {
+        "name": "Collegamento powerline"
+      },
+      "ethernet": {
+        "name": "Ethernet"
+      },
+      "ethernet_port": {
+        "name": "Porta Ethernet {port}"
+      }
+    },
+    "button": {
+      "restart": {
+        "name": "Riavvia"
+      }
+    },
+    "sensor": {
+      "peer_rx": {
+        "name": "Velocità in ricezione da {peer}"
+      },
+      "peer_tx": {
+        "name": "Velocità in trasmissione verso {peer}"
+      },
+      "adapters": {
+        "name": "Adattatori collegati"
+      },
+      "wifi_clients": {
+        "name": "Client Wi-Fi"
+      }
+    },
+    "switch": {
+      "led": {
+        "name": "LED"
+      },
+      "wifi_2g": {
+        "name": "Wi-Fi 2,4 GHz"
+      },
+      "wifi_5g": {
+        "name": "Wi-Fi 5 GHz"
+      }
+    }
+  },
+  "exceptions": {
+    "command_failed": {
+      "message": "L'adattatore non ha accettato il comando: {error}"
+    },
+    "auth_failed": {
+      "message": "L'adattatore ha rifiutato la password: inserisci quella attuale nella richiesta di nuova autenticazione."
+    }
+  }
+}

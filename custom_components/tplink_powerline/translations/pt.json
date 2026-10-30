@@ -1,0 +1,94 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "description": "Endereço e palavra-passe da interface web de um adaptador PLC TP-Link G.hn. Cada adaptador é adicionado separadamente.",
+        "data": {
+          "host": "Anfitrião",
+          "password": "Palavra-passe"
+        },
+        "data_description": {
+          "host": "Endereço IP ou nome do adaptador, por ex. 192.168.0.100",
+          "password": "A palavra-passe da página web do adaptador (não o seu TP-Link ID)"
+        }
+      },
+      "reauth_confirm": {
+        "description": "O adaptador {host} já não aceita a palavra-passe. Introduza a atual. Várias palavras-passe erradas seguidas bloqueiam a interface web durante algum tempo.",
+        "data": {
+          "password": "Palavra-passe"
+        }
+      },
+      "reconfigure": {
+        "description": "Alterar o endereço ou a palavra-passe deste adaptador.",
+        "data": {
+          "host": "Anfitrião",
+          "password": "Palavra-passe"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "O adaptador rejeitou a palavra-passe. Várias palavras-passe erradas seguidas bloqueiam a interface web durante algum tempo.",
+      "cannot_connect": "Nenhum adaptador PLC TP-Link suportado acessível neste endereço.",
+      "unknown": "Resposta inesperada do adaptador. Ative o registo de depuração e abra um problema.",
+      "busy": "Alguém tem sessão iniciada na página web do adaptador: termine-a e tente novamente.",
+      "locked": "A página web do adaptador está bloqueada após demasiadas palavras-passe erradas. Aguarde alguns minutos e tente novamente."
+    },
+    "abort": {
+      "already_configured": "Este adaptador já está configurado.",
+      "reauth_successful": "Palavra-passe atualizada.",
+      "reconfigure_successful": "Adaptador atualizado.",
+      "wrong_device": "Este endereço pertence a outro adaptador."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "powerline": {
+        "name": "Ligação PLC"
+      },
+      "ethernet": {
+        "name": "Ethernet"
+      },
+      "ethernet_port": {
+        "name": "Porta Ethernet {port}"
+      }
+    },
+    "button": {
+      "restart": {
+        "name": "Reiniciar"
+      }
+    },
+    "sensor": {
+      "peer_rx": {
+        "name": "Velocidade de receção de {peer}"
+      },
+      "peer_tx": {
+        "name": "Velocidade de transmissão para {peer}"
+      },
+      "adapters": {
+        "name": "Adaptadores ligados"
+      },
+      "wifi_clients": {
+        "name": "Clientes Wi-Fi"
+      }
+    },
+    "switch": {
+      "led": {
+        "name": "LED"
+      },
+      "wifi_2g": {
+        "name": "Wi-Fi 2,4 GHz"
+      },
+      "wifi_5g": {
+        "name": "Wi-Fi 5 GHz"
+      }
+    }
+  },
+  "exceptions": {
+    "command_failed": {
+      "message": "O adaptador não aceitou o comando: {error}"
+    },
+    "auth_failed": {
+      "message": "O adaptador rejeitou a palavra-passe: introduza a atual no pedido de nova autenticação."
+    }
+  }
+}

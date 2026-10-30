@@ -1,0 +1,58 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "powerline": {
+        "default": "mdi:power-plug-off-outline",
+        "state": {
+          "on": "mdi:power-plug-outline"
+        }
+      },
+      "ethernet": {
+        "default": "mdi:ethernet-off",
+        "state": {
+          "on": "mdi:ethernet"
+        }
+      },
+      "ethernet_port": {
+        "default": "mdi:ethernet-off",
+        "state": {
+          "on": "mdi:ethernet"
+        }
+      }
+    },
+    "sensor": {
+      "peer_rx": {
+        "default": "mdi:download-network-outline"
+      },
+      "peer_tx": {
+        "default": "mdi:upload-network-outline"
+      },
+      "adapters": {
+        "default": "mdi:power-plug-outline"
+      },
+      "wifi_clients": {
+        "default": "mdi:wifi"
+      }
+    },
+    "switch": {
+      "led": {
+        "default": "mdi:led-off",
+        "state": {
+          "on": "mdi:led-on"
+        }
+      },
+      "wifi_2g": {
+        "default": "mdi:wifi-off",
+        "state": {
+          "on": "mdi:wifi"
+        }
+      },
+      "wifi_5g": {
+        "default": "mdi:wifi-off",
+        "state": {
+          "on": "mdi:wifi"
+        }
+      }
+    }
+  }
+}

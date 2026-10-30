@@ -1,0 +1,94 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "description": "Adresse und Passwort der Weboberfläche eines TP-Link G.hn Powerline-Adapters. Jeder Adapter wird einzeln hinzugefügt.",
+        "data": {
+          "host": "Host",
+          "password": "Passwort"
+        },
+        "data_description": {
+          "host": "IP-Adresse oder Hostname des Adapters, z. B. 192.168.0.100",
+          "password": "Das Passwort der Webseite des Adapters (nicht deine TP-Link ID)"
+        }
+      },
+      "reauth_confirm": {
+        "description": "Der Adapter {host} akzeptiert das Passwort nicht mehr. Gib das aktuelle ein. Mehrere falsche Passwörter hintereinander sperren seine Weboberfläche für eine Weile.",
+        "data": {
+          "password": "Passwort"
+        }
+      },
+      "reconfigure": {
+        "description": "Adresse oder Passwort dieses Adapters ändern.",
+        "data": {
+          "host": "Host",
+          "password": "Passwort"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Der Adapter hat das Passwort abgelehnt. Mehrere falsche Passwörter hintereinander sperren seine Weboberfläche für eine Weile.",
+      "cannot_connect": "Unter dieser Adresse ist kein unterstützter TP-Link Powerline-Adapter erreichbar.",
+      "unknown": "Unerwartete Antwort des Adapters. Aktiviere das Debug-Protokoll und eröffne ein Issue.",
+      "busy": "Jemand ist an der Weboberfläche des Adapters angemeldet: Melde dich dort ab und versuche es erneut.",
+      "locked": "Die Weboberfläche des Adapters ist nach zu vielen falschen Passwörtern gesperrt. Warte ein paar Minuten und versuche es erneut."
+    },
+    "abort": {
+      "already_configured": "Dieser Adapter ist bereits eingerichtet.",
+      "reauth_successful": "Passwort aktualisiert.",
+      "reconfigure_successful": "Adapter aktualisiert.",
+      "wrong_device": "Diese Adresse gehört zu einem anderen Adapter."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "powerline": {
+        "name": "Powerline-Verbindung"
+      },
+      "ethernet": {
+        "name": "Ethernet"
+      },
+      "ethernet_port": {
+        "name": "Ethernet-Port {port}"
+      }
+    },
+    "button": {
+      "restart": {
+        "name": "Neustart"
+      }
+    },
+    "sensor": {
+      "peer_rx": {
+        "name": "Empfangsrate von {peer}"
+      },
+      "peer_tx": {
+        "name": "Studyate an {peer}"
+      },
+      "adapters": {
+        "name": "Verbundene Adapter"
+      },
+      "wifi_clients": {
+        "name": "WLAN-Clients"
+      }
+    },
+    "switch": {
+      "led": {
+        "name": "LEDs"
+      },
+      "wifi_2g": {
+        "name": "WLAN 2,4 GHz"
+      },
+      "wifi_5g": {
+        "name": "WLAN 5 GHz"
+      }
+    }
+  },
+  "exceptions": {
+    "command_failed": {
+      "message": "Der Adapter hat den Befehl nicht angenommen: {error}"
+    },
+    "auth_failed": {
+      "message": "Der Adapter hat das Passwort abgelehnt: Gib das aktuelle in der Aufforderung zur erneuten Authentifizierung ein."
+    }
+  }
+}

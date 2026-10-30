@@ -1,0 +1,94 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "description": "Address and web UI password of a TP-Link G.hn powerline adapter. Each adapter is added on its own.",
+        "data": {
+          "host": "Host",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "IP address or host name of the adapter, e.g. 192.168.0.100",
+          "password": "The password of the adapter's web page (not your TP-Link ID)"
+        }
+      },
+      "reauth_confirm": {
+        "description": "The adapter at {host} no longer accepts the password. Enter the current one. Several wrong passwords in a row lock its web UI for a while.",
+        "data": {
+          "password": "Password"
+        }
+      },
+      "reconfigure": {
+        "description": "Change the address or the password of this adapter.",
+        "data": {
+          "host": "Host",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "The adapter rejected the password. Several wrong passwords in a row lock its web UI for a while.",
+      "cannot_connect": "Could not reach a supported TP-Link powerline adapter at this address.",
+      "unknown": "Unexpected answer from the adapter. Enable debug logging and open an issue.",
+      "busy": "Someone is logged in to the adapter's web page: log out there, then try again.",
+      "locked": "The adapter's web page is locked after too many wrong passwords. Wait a few minutes, then try again."
+    },
+    "abort": {
+      "already_configured": "This adapter is already configured.",
+      "reauth_successful": "Password updated.",
+      "reconfigure_successful": "Adapter updated.",
+      "wrong_device": "This address belongs to a different adapter."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "powerline": {
+        "name": "Powerline link"
+      },
+      "ethernet": {
+        "name": "Ethernet"
+      },
+      "ethernet_port": {
+        "name": "Ethernet port {port}"
+      }
+    },
+    "button": {
+      "restart": {
+        "name": "Restart"
+      }
+    },
+    "sensor": {
+      "peer_rx": {
+        "name": "Receive rate from {peer}"
+      },
+      "peer_tx": {
+        "name": "Transmit rate to {peer}"
+      },
+      "adapters": {
+        "name": "Connected adapters"
+      },
+      "wifi_clients": {
+        "name": "Wi-Fi clients"
+      }
+    },
+    "switch": {
+      "led": {
+        "name": "LEDs"
+      },
+      "wifi_2g": {
+        "name": "Wi-Fi 2.4 GHz"
+      },
+      "wifi_5g": {
+        "name": "Wi-Fi 5 GHz"
+      }
+    }
+  },
+  "exceptions": {
+    "command_failed": {
+      "message": "The adapter did not accept the command: {error}"
+    },
+    "auth_failed": {
+      "message": "The adapter rejected the password: enter the current one in the re-authentication request."
+    }
+  }
+}

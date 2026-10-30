@@ -1,0 +1,94 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "description": "Adres en wachtwoord van de webinterface van een TP-Link G.hn powerline-adapter. Elke adapter wordt apart toegevoegd.",
+        "data": {
+          "host": "Host",
+          "password": "Wachtwoord"
+        },
+        "data_description": {
+          "host": "IP-adres of hostnaam van de adapter, bijv. 192.168.0.100",
+          "password": "Het wachtwoord van de webpagina van de adapter (niet je TP-Link ID)"
+        }
+      },
+      "reauth_confirm": {
+        "description": "De adapter {host} accepteert het wachtwoord niet meer. Voer het huidige in. Meerdere foute wachtwoorden achter elkaar blokkeren de webinterface een tijdje.",
+        "data": {
+          "password": "Wachtwoord"
+        }
+      },
+      "reconfigure": {
+        "description": "Wijzig het adres of het wachtwoord van deze adapter.",
+        "data": {
+          "host": "Host",
+          "password": "Wachtwoord"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "De adapter heeft het wachtwoord geweigerd. Meerdere foute wachtwoorden achter elkaar blokkeren de webinterface een tijdje.",
+      "cannot_connect": "Geen ondersteunde TP-Link powerline-adapter bereikbaar op dit adres.",
+      "unknown": "Onverwacht antwoord van de adapter. Schakel debuglogging in en open een issue.",
+      "busy": "Iemand is ingelogd op de webpagina van de adapter: log daar uit en probeer het opnieuw.",
+      "locked": "De webpagina van de adapter is geblokkeerd na te veel foute wachtwoorden. Wacht een paar minuten en probeer het opnieuw."
+    },
+    "abort": {
+      "already_configured": "Deze adapter is al geconfigureerd.",
+      "reauth_successful": "Wachtwoord bijgewerkt.",
+      "reconfigure_successful": "Adapter bijgewerkt.",
+      "wrong_device": "Dit adres hoort bij een andere adapter."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "powerline": {
+        "name": "Powerline-verbinding"
+      },
+      "ethernet": {
+        "name": "Ethernet"
+      },
+      "ethernet_port": {
+        "name": "Ethernetpoort {port}"
+      }
+    },
+    "button": {
+      "restart": {
+        "name": "Herstarten"
+      }
+    },
+    "sensor": {
+      "peer_rx": {
+        "name": "Ontvangstsnelheid van {peer}"
+      },
+      "peer_tx": {
+        "name": "Verzendsnelheid naar {peer}"
+      },
+      "adapters": {
+        "name": "Verbonden adapters"
+      },
+      "wifi_clients": {
+        "name": "Wifi-clients"
+      }
+    },
+    "switch": {
+      "led": {
+        "name": "Leds"
+      },
+      "wifi_2g": {
+        "name": "Wifi 2,4 GHz"
+      },
+      "wifi_5g": {
+        "name": "Wifi 5 GHz"
+      }
+    }
+  },
+  "exceptions": {
+    "command_failed": {
+      "message": "De adapter heeft de opdracht niet geaccepteerd: {error}"
+    },
+    "auth_failed": {
+      "message": "De adapter heeft het wachtwoord geweigerd: voer het huidige in bij het verzoek om opnieuw te verifiëren."
+    }
+  }
+}

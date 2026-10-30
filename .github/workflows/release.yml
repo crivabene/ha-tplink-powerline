@@ -1,0 +1,25 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  zip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the manifest version matches the tag
+        run: |
+          version=$(jq -r .version custom_components/tplink_powerline/manifest.json)
+          [ "v$version" = "${{ github.event.release.tag_name }}" ] || {
+            echo "manifest.json has $version, release is ${{ github.event.release.tag_name }}"; exit 1; }
+      - name: Build tplink_powerline.zip
+        run: cd custom_components/tplink_powerline && zip -r ../../tplink_powerline.zip . -x '*/__pycache__/*'
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" tplink_powerline.zip --clobber

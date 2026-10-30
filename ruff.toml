@@ -1,0 +1,15 @@
+target-version = "py313"
+line-length = 100
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "ASYNC", "RUF", "PL", "S", "LOG", "G", "PIE", "RET", "TRY"]
+# RUF012: `_attr_*` class attributes are the Home Assistant entity idiom
+ignore = ["PLR2004", "PLR0913", "TRY003", "RUF001", "RUF002", "RUF003", "RUF012"]
+
+[lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "PLC0415", "S311", "S324", "S505", "PLR0911", "PLR0912"]
+
+[lint.isort]
+known-first-party = ["custom_components"]
+force-sort-within-sections = true
+combine-as-imports = true

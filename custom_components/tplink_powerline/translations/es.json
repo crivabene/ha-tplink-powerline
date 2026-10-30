@@ -1,0 +1,94 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "description": "Dirección y contraseña de la interfaz web de un adaptador PLC TP-Link G.hn. Cada adaptador se añade por separado.",
+        "data": {
+          "host": "Host",
+          "password": "Contraseña"
+        },
+        "data_description": {
+          "host": "Dirección IP o nombre de host del adaptador, p. ej. 192.168.0.100",
+          "password": "La contraseña de la página web del adaptador (no tu TP-Link ID)"
+        }
+      },
+      "reauth_confirm": {
+        "description": "El adaptador {host} ya no acepta la contraseña. Introduce la actual. Varias contraseñas incorrectas seguidas bloquean su interfaz web durante un tiempo.",
+        "data": {
+          "password": "Contraseña"
+        }
+      },
+      "reconfigure": {
+        "description": "Cambia la dirección o la contraseña de este adaptador.",
+        "data": {
+          "host": "Host",
+          "password": "Contraseña"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "El adaptador ha rechazado la contraseña. Varias contraseñas incorrectas seguidas bloquean su interfaz web durante un tiempo.",
+      "cannot_connect": "No hay ningún adaptador PLC TP-Link compatible accesible en esta dirección.",
+      "unknown": "Respuesta inesperada del adaptador. Activa el registro de depuración y abre una incidencia.",
+      "busy": "Hay alguien conectado a la página web del adaptador: cierra la sesión allí y vuelve a intentarlo.",
+      "locked": "La página web del adaptador está bloqueada tras demasiadas contraseñas incorrectas. Espera unos minutos y vuelve a intentarlo."
+    },
+    "abort": {
+      "already_configured": "Este adaptador ya está configurado.",
+      "reauth_successful": "Contraseña actualizada.",
+      "reconfigure_successful": "Adaptador actualizado.",
+      "wrong_device": "Esta dirección pertenece a otro adaptador."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "powerline": {
+        "name": "Enlace PLC"
+      },
+      "ethernet": {
+        "name": "Ethernet"
+      },
+      "ethernet_port": {
+        "name": "Puerto Ethernet {port}"
+      }
+    },
+    "button": {
+      "restart": {
+        "name": "Reiniciar"
+      }
+    },
+    "sensor": {
+      "peer_rx": {
+        "name": "Velocidad de recepción desde {peer}"
+      },
+      "peer_tx": {
+        "name": "Velocidad de transmisión hacia {peer}"
+      },
+      "adapters": {
+        "name": "Adaptadores conectados"
+      },
+      "wifi_clients": {
+        "name": "Clientes Wi-Fi"
+      }
+    },
+    "switch": {
+      "led": {
+        "name": "LED"
+      },
+      "wifi_2g": {
+        "name": "Wi-Fi 2,4 GHz"
+      },
+      "wifi_5g": {
+        "name": "Wi-Fi 5 GHz"
+      }
+    }
+  },
+  "exceptions": {
+    "command_failed": {
+      "message": "El adaptador no ha aceptado el comando: {error}"
+    },
+    "auth_failed": {
+      "message": "El adaptador ha rechazado la contraseña: introduce la actual en la solicitud de nueva autenticación."
+    }
+  }
+}

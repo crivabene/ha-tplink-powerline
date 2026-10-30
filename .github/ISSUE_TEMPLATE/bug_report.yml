@@ -1,0 +1,37 @@
+name: Bug report
+description: Something does not work as expected
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Adapter model, hardware and firmware version
+      placeholder: PGW2440 v1.0, firmware 1.0.4 Build 20240830
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Integration and Home Assistant versions
+      placeholder: TP-Link Powerline (G.hn) 0.1.0, Home Assistant 2026.10.4
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Device page → ⋮ → Download diagnostics. Passwords, MAC and IP addresses are removed.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Debug log
+      description: "With `custom_components.tplink_powerline: debug`. Remove anything personal."
+      render: text

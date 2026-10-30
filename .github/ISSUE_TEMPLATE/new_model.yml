@@ -1,0 +1,53 @@
+name: New adapter model
+description: Help add support for another TP-Link G.hn powerline adapter
+labels: ["new model"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! See [CONTRIBUTING.md](https://github.com/crivabene/ha-tplink-powerline/blob/main/CONTRIBUTING.md#adding-an-adapter-model)
+        for how to record what the adapter's web page sends. **Replace passwords, password
+        hashes, session tokens (`_t=`, `stok`), cookies and Wi-Fi keys with `XXX`** before
+        pasting anything.
+  - type: input
+    id: model
+    attributes:
+      label: Model, hardware and firmware version
+      description: From the adapter's web page or label
+      placeholder: PG2400P v1.0, firmware 1.0.3 Build 20221213
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: What happens when you add it
+      options:
+        - It is added and some entities are missing or wrong
+        - '"Could not reach a supported adapter"'
+        - Login fails although the password is right
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: works
+    attributes:
+      label: What already works
+      description: Entities that appear and behave correctly, and what is missing or wrong.
+  - type: textarea
+    id: requests
+    attributes:
+      label: Requests copied from the web page
+      description: One action per block, "Copy as cURL", with secrets replaced by XXX.
+      render: shell
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Drag the downloaded diagnostics file here, if the adapter could be added.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I removed passwords, hashes, session tokens, cookies and Wi-Fi keys from everything I pasted.
+          required: true

@@ -1,0 +1,94 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "description": "Adresse et mot de passe de l'interface web d'un adaptateur CPL TP-Link G.hn. Chaque adaptateur s'ajoute séparément.",
+        "data": {
+          "host": "Hôte",
+          "password": "Mot de passe"
+        },
+        "data_description": {
+          "host": "Adresse IP ou nom d'hôte de l'adaptateur, par ex. 192.168.0.100",
+          "password": "Le mot de passe de la page web de l'adaptateur (pas votre TP-Link ID)"
+        }
+      },
+      "reauth_confirm": {
+        "description": "L'adaptateur {host} n'accepte plus le mot de passe. Saisissez le mot de passe actuel. Plusieurs mots de passe erronés d'affilée bloquent son interface web pendant un moment.",
+        "data": {
+          "password": "Mot de passe"
+        }
+      },
+      "reconfigure": {
+        "description": "Modifier l'adresse ou le mot de passe de cet adaptateur.",
+        "data": {
+          "host": "Hôte",
+          "password": "Mot de passe"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "L'adaptateur a refusé le mot de passe. Plusieurs mots de passe erronés d'affilée bloquent son interface web pendant un moment.",
+      "cannot_connect": "Aucun adaptateur CPL TP-Link pris en charge n'est joignable à cette adresse.",
+      "unknown": "Réponse inattendue de l'adaptateur. Activez les journaux de débogage et ouvrez un ticket.",
+      "busy": "Quelqu'un est connecté à la page web de l'adaptateur : déconnectez-vous-en, puis réessayez.",
+      "locked": "La page web de l'adaptateur est bloquée après trop de mots de passe erronés. Patientez quelques minutes, puis réessayez."
+    },
+    "abort": {
+      "already_configured": "Cet adaptateur est déjà configuré.",
+      "reauth_successful": "Mot de passe mis à jour.",
+      "reconfigure_successful": "Adaptateur mis à jour.",
+      "wrong_device": "Cette adresse correspond à un autre adaptateur."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "powerline": {
+        "name": "Liaison CPL"
+      },
+      "ethernet": {
+        "name": "Ethernet"
+      },
+      "ethernet_port": {
+        "name": "Port Ethernet {port}"
+      }
+    },
+    "button": {
+      "restart": {
+        "name": "Redémarrer"
+      }
+    },
+    "sensor": {
+      "peer_rx": {
+        "name": "Débit reçu de {peer}"
+      },
+      "peer_tx": {
+        "name": "Débit émis vers {peer}"
+      },
+      "adapters": {
+        "name": "Adaptateurs connectés"
+      },
+      "wifi_clients": {
+        "name": "Clients Wi-Fi"
+      }
+    },
+    "switch": {
+      "led": {
+        "name": "LED"
+      },
+      "wifi_2g": {
+        "name": "Wi-Fi 2,4 GHz"
+      },
+      "wifi_5g": {
+        "name": "Wi-Fi 5 GHz"
+      }
+    }
+  },
+  "exceptions": {
+    "command_failed": {
+      "message": "L'adaptateur n'a pas accepté la commande : {error}"
+    },
+    "auth_failed": {
+      "message": "L'adaptateur a refusé le mot de passe : saisissez le mot de passe actuel dans la demande de nouvelle authentification."
+    }
+  }
+}
