@@ -24,13 +24,13 @@ HomePlug AV adapters (TL-PA...) speak another protocol and are not supported.
 
 ## Installation
 
-### HACS (recommended)
+### Marketplace (recommended)
 
 [![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=crivabene&repository=ha-tplink-powerline&category=integration)
 
-Or: HACS → ⋮ → Custom repositories → add `https://github.com/crivabene/ha-tplink-powerline`
-with category *Integration*. Then download **TP-Link Powerline (G.hn)** and restart Home
-Assistant. HACS will offer updates when a new release comes out.
+Or open **Settings → Marketplace**, search for **TP-Link Powerline (G.hn)**, download it and
+restart Home Assistant. On Home Assistant 2026.10, use HACS instead: the steps are the same.
+You will be offered updates when a new release comes out.
 
 ### Manual
 
