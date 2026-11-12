@@ -187,8 +187,16 @@ class _Adapter:
     # was refused must not try the same password again
     rejected: set[str] = field(default_factory=set)
     lost_logins: int = 0
-    # Until then the adapter is writing new firmware and restarting: left alone
+    # Until then the adapter may be downloading or writing new firmware: left alone
     upgrading_until: float = float("-inf")
+
+    @property
+    def upgrading(self) -> bool:
+        return time.monotonic() < self.upgrading_until
+
+    def protect(self, seconds: float) -> None:
+        """Leave the adapter alone for `seconds` from now (0 lifts the protection)."""
+        self.upgrading_until = time.monotonic() + seconds if seconds else float("-inf")
 
 
 # Per event loop, then per adapter address
@@ -324,7 +332,7 @@ class PowerlineClient:
         async with adapter.lock:
             if self.paused:
                 raise PowerlineError("paused while the adapter is being reconfigured")
-            if time.monotonic() < adapter.upgrading_until:
+            if adapter.upgrading:
                 raise PowerlineUpgradingError("the adapter is installing new firmware")
             if not deliberate and self._digest() in adapter.rejected:
                 raise PowerlineAuthError("password rejected earlier")
@@ -348,7 +356,7 @@ class PowerlineClient:
                 # Only the type: the data may hold a Wi-Fi key
                 raise PowerlineError(f"unexpected data ({type(err).__name__})") from err
             finally:
-                if time.monotonic() < adapter.upgrading_until:
+                if adapter.upgrading:
                     # Writing firmware: not even a logout (the web page sends none either);
                     # the session ends with the restart
                     self._forget_session()
@@ -402,7 +410,6 @@ class EncryptedClient(PowerlineClient):
         self._hash = hashlib.md5(password.encode()).hexdigest()  # noqa: S324 - device protocol
         self._rsa: tuple[str, str] = ("", "")
         self._seq = 0
-        self._has_wifi = False
 
     @property
     def headers(self) -> dict[str, str]:
@@ -537,12 +544,10 @@ class EncryptedClient(PowerlineClient):
         # adapter is gone, as for every other read
         night = await self._optional(LED_PATH, {"operation": "read"})
         schedule = await self._optional(LED_PATH, {"operation": "load"})
-        # Guest networks ride on the Wi-Fi bands: not asked of an adapter that never showed
-        # any Wi-Fi (a Wi-Fi answer missing once does not hide them)
-        self._has_wifi = self._has_wifi or wlan is not None
+        # Guest networks ride on the Wi-Fi bands: not asked when Wi-Fi did not answer
         guest = {
             band: await self._optional(GUEST_PATH + band, {"operation": "read"})
-            if self._has_wifi
+            if wlan is not None
             else None
             for band in GUEST_BANDS
         }
@@ -561,9 +566,7 @@ class EncryptedClient(PowerlineClient):
                 if p.get("status", "on") == "on"
             ],
             led=str(led.get("enable")) == "1" if led_free else None,
-            # Only with a schedule it can write back: otherwise it could be turned off but
-            # never on again
-            night_mode=_flag(night, "enable") if led_free and start and end else None,
+            night_mode=_flag(night, "enable") if led_free else None,
             night_start=start,
             night_end=end,
             guest_2g=guest_state(guest["2g"], "2g"),
@@ -621,16 +624,15 @@ class EncryptedClient(PowerlineClient):
         the adapter already holds, written back unchanged."""
 
         async def work() -> None:
-            if not on:
-                await self.request(LED_PATH, {"operation": "write", "enable": "0"})
-                return
-            # Before writing anything: an unreadable schedule is never replaced
+            # Before writing anything, both ways: an unreadable schedule is never replaced,
+            # and a switch that could not turn night mode back on does not turn it off
             schedule = await self.request(LED_PATH, {"operation": "load"})
             fields = schedule_fields(
                 *encrypted_schedule(schedule), ("shour", "smin", "ehour", "emin")
             )
-            await self.request(LED_PATH, {"operation": "write", "enable": "1"})
-            await self.request(LED_PATH, {"operation": "update"} | fields)
+            await self.request(LED_PATH, {"operation": "write", "enable": "1" if on else "0"})
+            if on:
+                await self.request(LED_PATH, {"operation": "update"} | fields)
 
         await self._exchange(work)
 
@@ -640,6 +642,8 @@ class EncryptedClient(PowerlineClient):
 
         async def work() -> None:
             current = await self.request(path, {"operation": "read"})
+            # Refused both ways when it could not be turned back on unchanged
+            guest_settings(current, band, True)
             await self.request(path, {"operation": "write"} | guest_settings(current, band, on))
 
         await self._exchange(work)
@@ -654,19 +658,23 @@ class EncryptedClient(PowerlineClient):
         if not self.online_upgrade(firmware):
             return None
 
-        async def work() -> Any:
-            # As the page's "Check for upgrades" button: its checks, then the answer. A
-            # failed check does not stop it: the page shows the same answer when opened
+        async def work() -> tuple[Any, PowerlineRejected | None]:
+            # As the page's "Check for upgrades" button: its checks, then the answer
             try:
                 await self._cloud_checks()
             except PowerlineRejected as err:
-                _LOGGER.debug("Online upgrade check of %s: %s", self._base, err)
-            return await self.request(CLOUD_PATH + "cloud_upgrade", {"operation": "read"})
+                failed = err
+            else:
+                failed = None
+            return await self.request(CLOUD_PATH + "cloud_upgrade", {"operation": "read"}), failed
 
-        info = await self._exchange(work)
+        info, failed = await self._exchange(work)
         if not isinstance(info, dict):
             raise PowerlineError("unexpected online upgrade answer")
         latest = str(info.get("latest_version") or "").strip() or None
+        if failed is not None and latest is None and not _truthy(info.get("latest_flag")):
+            # No check happened and nothing is known: not "up to date"
+            raise PowerlineError(f"online upgrade check failed: {failed.code}")
         return FirmwareInfo(
             latest=latest,
             up_to_date=_truthy(info.get("latest_flag")) or latest is None,
@@ -700,19 +708,23 @@ class EncryptedClient(PowerlineClient):
                 + UPGRADE_MARGIN
             )
             await self._cloud_checks()
-            await self.request(CLOUD_PATH + "cloud_upgrade", {"operation": "upgrade"})
             adapter = _adapter(self._base)
+            # From the moment the upgrade is asked for, even if its answer gets lost, the
+            # adapter may download and write firmware: nothing else may reach it, not even
+            # a command or a poll queued behind this exchange. Until the download is
+            # followed to its end, assume the longest download plus the writing
+            adapter.protect(DOWNLOAD_TIMEOUT + seconds)
             try:
+                await self.request(CLOUD_PATH + "cloud_upgrade", {"operation": "upgrade"})
                 await self._follow_download(progress)
             except PowerlineDownloadError:
-                raise  # the adapter said the download failed: it writes nothing
-            except BaseException:
-                # Lost track of a download the adapter accepted: it may be writing already
-                adapter.upgrading_until = time.monotonic() + seconds
+                adapter.protect(0)  # the adapter said the download failed: it writes nothing
                 raise
-            # From here the adapter writes the firmware: nothing else may reach it, not
-            # even a command or a poll that queued behind this exchange
-            adapter.upgrading_until = time.monotonic() + seconds
+            except BaseException:
+                # Lost track: the download may still run, then the writing
+                adapter.protect(DOWNLOAD_TIMEOUT + seconds)
+                raise
+            adapter.protect(seconds)  # downloaded: now it writes and restarts
             return seconds
 
         return await self._exchange(work)
@@ -733,15 +745,20 @@ class EncryptedClient(PowerlineClient):
                 if failures >= DOWNLOAD_MAX_FAILURES:
                     raise
                 continue
-            failures = 0
             if not isinstance(status, dict):
-                raise PowerlineError("unexpected download status")
-            if not _falsy(status.get("download_fail")):
+                status = {}
+            if _truthy(status.get("download_fail")):
+                # Only a clear failure counts: anything else may still be a download
                 raise PowerlineDownloadError("the adapter could not download the firmware")
             try:
-                percent = int(float(status.get("percent") or 0))
-            except (TypeError, ValueError):
-                continue  # not a number yet: ask again
+                percent = int(float(status.get("percent")))
+            except (TypeError, ValueError, OverflowError):
+                # Not a progress it can read: counted like an unanswered poll
+                failures += 1
+                if failures >= DOWNLOAD_MAX_FAILURES:
+                    raise PowerlineError("unreadable download progress") from None
+                continue
+            failures = 0
             progress(max(0, min(percent, 100)))
             if percent >= 100:
                 return
@@ -767,17 +784,6 @@ def short_version(text: str | None) -> str | None:
 
 def _truthy(value: Any) -> bool:
     return value is True or str(value).strip().lower() in ("1", "true", "yes", "on")
-
-
-def _falsy(value: Any) -> bool:
-    """No flag at all, or one clearly off: anything else (codes, text) counts as set."""
-    return value in (None, False, 0) or str(value).strip().lower() in (
-        "",
-        "0",
-        "false",
-        "no",
-        "off",
-    )
 
 
 def _flag(values: dict | None, key: str) -> bool | None:
@@ -831,12 +837,6 @@ def guest_state(values: Any, band: str) -> bool | None:
     if not isinstance(values, dict) or f"guest_{band}_enable" not in values:
         return None
     if values.get(f"guest_{band}_disabled") == "on":
-        return None
-    try:
-        # Only a network it can write back unchanged: otherwise it could be turned off but
-        # never on again
-        guest_settings(values, band, True)
-    except PowerlineError:
         return None
     return values[f"guest_{band}_enable"] == "on"
 
@@ -1019,9 +1019,8 @@ class LegacyClient(PowerlineClient):
             name=node.get("NODE.GENERAL.DEVICE_NAME"),
             peers=legacy_peers(network, mac),
             led=led.get("TPLINK.LEDSCHEDULE.LED_ENABLE") == "YES",
-            # Only with a schedule it can write back, as on the encrypted firmware
             night_mode=None
-            if not (start and end) or night.get("TPLINK.LEDSCHEDULE.ENABLE") is None
+            if night is None or night.get("TPLINK.LEDSCHEDULE.ENABLE") is None
             else night["TPLINK.LEDSCHEDULE.ENABLE"] == "YES",
             night_start=start,
             night_end=end,
@@ -1054,14 +1053,14 @@ class LegacyClient(PowerlineClient):
         the flag with the schedule the adapter already holds, unchanged, as integers."""
 
         async def work() -> None:
+            # Before writing anything, both ways: an unreadable schedule is never replaced,
+            # and a switch that could not turn night mode back on does not turn it off
+            schedule = legacy_schedule(await self.read(*LEGACY_NIGHT))
+            fields = schedule_fields(*schedule, LEGACY_NIGHT[1:])
             if not on:
                 await self.write({"TPLINK.LEDSCHEDULE.ENABLE": "NO"})
                 return
-            # Before writing anything: an unreadable schedule is never replaced
-            schedule = legacy_schedule(await self.read(*LEGACY_NIGHT))
-            await self.write(
-                {"TPLINK.LEDSCHEDULE.ENABLE": "YES"} | schedule_fields(*schedule, LEGACY_NIGHT[1:])
-            )
+            await self.write({"TPLINK.LEDSCHEDULE.ENABLE": "YES"} | fields)
 
         await self._exchange(work)
 
@@ -1107,7 +1106,7 @@ async def detect(session: aiohttp.ClientSession, host: str, password: str) -> Po
     encrypted = EncryptedClient(session, host, password)
     legacy = LegacyClient(session, host, password)
     async with encrypted.lock:
-        if time.monotonic() < _adapter(encrypted._base).upgrading_until:
+        if _adapter(encrypted._base).upgrading:
             raise PowerlineUpgradingError("the adapter is installing new firmware")
         try:
             answer = _json(await encrypted._post("/admin/locale?form=index_lang", "operation=read"))

@@ -3,6 +3,7 @@
 from datetime import timedelta
 from unittest.mock import patch
 
+import aiohttp
 from homeassistant.components.update import ATTR_IN_PROGRESS, UpdateEntityFeature
 from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE
 from homeassistant.exceptions import HomeAssistantError
@@ -572,7 +573,7 @@ async def test_no_upgrade_when_already_up_to_date(hass, encrypted_device):
     assert not [w for w in encrypted_device.writes if w[1].get("operation") == "upgrade"]
 
 
-@pytest.mark.parametrize("flag", [2, -1, "fail", "true"])
+@pytest.mark.parametrize("flag", [True, 1, "1", "true"])
 async def test_download_failure_codes(hass, encrypted_device, flag):
     encrypted_device.firmware_1_1()
     original = encrypted_device._cloud
@@ -591,16 +592,6 @@ async def test_download_failure_codes(hass, encrypted_device, flag):
         await encrypted_client(hass).install_firmware("1.1.0 Build 20250826", lambda _p: None)
 
 
-async def test_switches_never_one_way(hass, encrypted_device):
-    # A guest network or a schedule it could not write back unchanged: no switch at all,
-    # rather than one that turns off but never on again
-    encrypted_device.data[GUEST_2G]["guest_2g_psk_version"] = "rsn"
-    encrypted_device.data["schedule"] = [{"shour": "22", "smin": "30", "ehour": "24", "emin": "0"}]
-    state = await encrypted_client(hass).state()
-    assert state.guest_2g is None
-    assert state.night_mode is None
-
-
 async def test_legacy_night_read_http_error_hides_only_night_mode(hass, serve):
     device = fixtures.LegacyDevice()
     original = device.__call__
@@ -617,15 +608,6 @@ async def test_legacy_night_read_http_error_hides_only_night_mode(hass, serve):
     assert state.led is True
 
 
-async def test_guest_reads_survive_a_missing_wifi_answer(hass, encrypted_device):
-    client = encrypted_client(hass)
-    await client.state()
-    encrypted_device.missing.add("/admin/wlan_status")
-    state = await client.state()
-    assert state.wifi_2g is None
-    assert state.guest_2g is False
-
-
 async def test_firmware_check_backs_off(hass, encrypted_entry_factory, encrypted_device):
     encrypted_device.firmware_1_1()
     encrypted_device.fail_on["/admin/cloud_account?form=cloud_upgrade"] = "cloud error"
@@ -638,3 +620,100 @@ async def test_firmware_check_backs_off(hass, encrypted_entry_factory, encrypted
         delays.append(firmware._next_retry())
     assert delays[:4] == [1800, 3600, 7200, 14400]
     assert delays[-1] == 43200
+
+
+# --- Third review fixes ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("flag", ["null", "none", "ok", 2])
+async def test_unclear_download_flags_are_not_failures(hass, encrypted_device, flag):
+    encrypted_device.firmware_1_1()
+    original = encrypted_device._cloud
+
+    def unclear(method, url, path, params):
+        if path.endswith("detect_upgrade_status"):
+            percent = (
+                encrypted_device.download.pop(0) if len(encrypted_device.download) > 1 else 100
+            )
+            data = {"percent": str(percent), "download_fail": flag}
+            return encrypted_device._reply(method, url, {"success": True, "data": data})
+        return original(method, url, path, params)
+
+    encrypted_device._cloud = unclear
+    with patch("custom_components.tplink_powerline.api.DOWNLOAD_POLL", 0):
+        assert await encrypted_client(hass).install_firmware(
+            "1.1.0 Build 20250826", lambda _p: None
+        )
+
+
+async def test_lost_upgrade_answer_still_protects_the_adapter(hass, encrypted_device):
+    encrypted_device.firmware_1_1()
+    original = encrypted_device._cloud
+
+    def lost_answer(method, url, path, params):
+        if params.get("operation") == "upgrade":
+            encrypted_device.writes.append((path, params))
+            return AiohttpClientMockResponse(method, url, exc=aiohttp.ServerDisconnectedError())
+        return original(method, url, path, params)
+
+    encrypted_device._cloud = lost_answer
+    client = encrypted_client(hass)
+    with pytest.raises(PowerlineError):
+        await client.install_firmware("1.1.0 Build 20250826", lambda _p: None)
+    with pytest.raises(PowerlineUpgradingError):
+        await client.state()
+
+
+async def test_unreadable_progress_gives_up(hass, encrypted_device):
+    encrypted_device.firmware_1_1()
+    original = encrypted_device._cloud
+
+    def weird(method, url, path, params):
+        if path.endswith("detect_upgrade_status"):
+            data = {"percent": "50%", "download_fail": "0"}
+            return encrypted_device._reply(method, url, {"success": True, "data": data})
+        return original(method, url, path, params)
+
+    encrypted_device._cloud = weird
+    client = encrypted_client(hass)
+    with (
+        patch("custom_components.tplink_powerline.api.DOWNLOAD_POLL", 0),
+        pytest.raises(PowerlineError, match="unreadable download progress"),
+    ):
+        await client.install_firmware("1.1.0 Build 20250826", lambda _p: None)
+    # Lost track of an accepted upgrade: still left alone
+    with pytest.raises(PowerlineUpgradingError):
+        await client.state()
+
+
+async def test_failed_checks_without_an_answer_are_not_up_to_date(hass, encrypted_device):
+    encrypted_device.firmware_1_1()
+    encrypted_device.fail_on["/admin/cloud_account?form=check_internet"] = "no internet"
+    encrypted_device.cloud_data |= {"latest_version": "", "latest_flag": False}
+    with pytest.raises(PowerlineError, match="check failed"):
+        await encrypted_client(hass).firmware_info("1.1.0 Build 20250826")
+
+
+async def test_unwritable_switches_show_their_state_and_refuse_both_ways(hass, encrypted_device):
+    encrypted_device.data[GUEST_2G] |= {"guest_2g_psk_version": "rsn", "guest_2g_enable": "on"}
+    encrypted_device.data["schedule"] = [{"shour": "22", "smin": "30", "ehour": "24", "emin": "0"}]
+    client = encrypted_client(hass)
+    state = await client.state()
+    assert state.guest_2g is True
+    assert state.night_mode is False
+    with pytest.raises(PowerlineError, match="security version"):
+        await client.set_guest("2g", False)
+    with pytest.raises(PowerlineError, match="night mode schedule"):
+        await client.set_night_mode(False)
+    assert not [w for w in encrypted_device.writes if w[0] in (GUEST_2G, LED)]
+
+
+async def test_busy_web_ui_does_not_back_off(hass, encrypted_entry_factory, encrypted_device):
+    encrypted_device.firmware_1_1()
+    entry = await encrypted_entry_factory()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    firmware = entry.runtime_data.firmware
+    encrypted_device._logged_in = True  # someone else logged in to the web page
+    for _ in range(3):
+        await firmware.async_refresh()
+    assert firmware._next_retry() == 900

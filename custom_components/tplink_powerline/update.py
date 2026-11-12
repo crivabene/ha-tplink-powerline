@@ -139,10 +139,17 @@ class FirmwareUpdate(PowerlineEntity, UpdateEntity):
         self._attr_update_percentage = 0
         self.async_write_ha_state()
         try:
-            seconds = await coordinator.async_command(
-                lambda: coordinator.client.install_firmware(coordinator.data.firmware, progress),
-                confirm=False,
-            )
+            try:
+                seconds = await coordinator.async_command(
+                    lambda: coordinator.client.install_firmware(
+                        coordinator.data.firmware, progress
+                    ),
+                    confirm=False,
+                )
+            except HomeAssistantError:
+                # E.g. already up to date: show what the adapter says now
+                self.hass.async_create_task(coordinator.firmware.async_request_refresh())
+                raise
             # Downloaded: the adapter now writes the firmware and restarts, offline meanwhile
             self._attr_update_percentage = None
             self.async_write_ha_state()
@@ -150,9 +157,11 @@ class FirmwareUpdate(PowerlineEntity, UpdateEntity):
         finally:
             self._attr_update_percentage = None
         before = coordinator.data.firmware
-        await coordinator.async_request_refresh()
-        if coordinator.data.firmware == before:
-            # New firmware starts its own check (see the coordinator); otherwise check here
+        # Not debounced: the comparison below needs this very read
+        await coordinator.async_refresh()
+        if coordinator.last_update_success and coordinator.data.firmware == before:
+            # New firmware starts its own check (see the coordinator); an adapter still
+            # restarting is left to the regular polls
             await coordinator.firmware.async_request_refresh()
 
 

@@ -175,7 +175,9 @@ card editor. On an adapter without Wi-Fi, drop the two Wi-Fi tiles.
   counted as a wrong attempt.
 - **Wi-Fi, guest network and night mode switches** rewrite the settings exactly as the web
   page does, changing only the on/off flag: names, passwords and schedules are left as set
-  on the web page.
+  on the web page. When a setting could not be written back unchanged (a guest network
+  with a security mode the web page does not offer, a schedule it cannot read), the switch
+  still shows its state but refuses to change it, both ways: fix it on the web page.
 
 ## Firmware updates
 

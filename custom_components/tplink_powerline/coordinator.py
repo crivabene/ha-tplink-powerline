@@ -27,7 +27,13 @@ from homeassistant.helpers.update_coordinator import (
     UpdateFailed,
 )
 
-from .api import PowerlineAuthError, PowerlineClient, PowerlineError, PowerlineState
+from .api import (
+    PowerlineAuthError,
+    PowerlineBusyError,
+    PowerlineClient,
+    PowerlineError,
+    PowerlineState,
+)
 from .const import (
     CONF_REJECTED,
     CONF_WEBSITE_CHECK,
@@ -195,8 +201,10 @@ class FirmwareCoordinator(DataUpdateCoordinator[FirmwareCheck | None]):
     async def _async_update_data(self) -> FirmwareCheck | None:
         try:
             result = await self._check()
-        except UpdateFailed:
-            self._failures += 1
+        except UpdateFailed as err:
+            if not isinstance(err.__cause__, PowerlineBusyError):
+                # Capped: the delay tops out at the interval anyway
+                self._failures = min(self._failures + 1, 10)
             raise
         self._failures = 0
         return result
@@ -230,8 +238,11 @@ class FirmwareCoordinator(DataUpdateCoordinator[FirmwareCheck | None]):
         except PowerlineAuthError as err:
             main._reject()
             raise ConfigEntryAuthFailed(str(err)) from err
+        except PowerlineBusyError as err:
+            # Someone in the web UI: not a failure of the check, try again soon as is
+            raise UpdateFailed(str(err), retry_after=FIRMWARE_RETRY.total_seconds()) from err
         except PowerlineError as err:
-            # Busy web UI, an adapter restarting, a website down: try again soon, not in 12 h
+            # An adapter restarting, a website down: try again soon, then less and less
             raise UpdateFailed(str(err), retry_after=self._next_retry()) from err
         if found is None:
             return None
