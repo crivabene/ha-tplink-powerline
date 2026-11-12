@@ -106,8 +106,12 @@ class PowerlineCoordinator(DataUpdateCoordinator[PowerlineState]):
                 registry.async_update_device(
                     device.id, sw_version=state.firmware, hw_version=state.hardware
                 )
+        # Not started at once: it must see this new state, set once this poll returns
         self.config_entry.async_create_background_task(
-            self.hass, self.firmware.async_request_refresh(), "firmware check after an upgrade"
+            self.hass,
+            self.firmware.async_request_refresh(),
+            "firmware check after an upgrade",
+            eager_start=False,
         )
 
     @property
@@ -180,18 +184,33 @@ class FirmwareCoordinator(DataUpdateCoordinator[FirmwareCheck | None]):
             update_interval=FIRMWARE_INTERVAL,
         )
         self.main = main
-        self._retry = FIRMWARE_RETRY.total_seconds()
+        self._failures = 0
+
+    def _next_retry(self) -> float:
+        """15 minutes after a failure, doubling with each one in a row, up to the interval
+        (persistent errors, e.g. no Internet, must not mean a login every 15 minutes)."""
+        delay = FIRMWARE_RETRY.total_seconds() * 2**self._failures
+        return min(delay, FIRMWARE_INTERVAL.total_seconds())
 
     async def _async_update_data(self) -> FirmwareCheck | None:
+        try:
+            result = await self._check()
+        except UpdateFailed:
+            self._failures += 1
+            raise
+        self._failures = 0
+        return result
+
+    async def _check(self) -> FirmwareCheck | None:
         main = self.main
         if main.auth_failed:
             # Re-authentication is already asked for by the adapter's own polling
             raise UpdateFailed(
-                "password rejected, waiting for re-authentication", retry_after=self._retry
+                "password rejected, waiting for re-authentication", retry_after=self._next_retry()
             )
         state = main.data
         if state is None:
-            raise UpdateFailed("the adapter has not been read yet", retry_after=self._retry)
+            raise UpdateFailed("the adapter has not been read yet", retry_after=self._next_retry())
         url = page_url(state.model, state.hardware)
         try:
             info = await main.client.firmware_info(state.firmware)
@@ -213,7 +232,7 @@ class FirmwareCoordinator(DataUpdateCoordinator[FirmwareCheck | None]):
             raise ConfigEntryAuthFailed(str(err)) from err
         except PowerlineError as err:
             # Busy web UI, an adapter restarting, a website down: try again soon, not in 12 h
-            raise UpdateFailed(str(err), retry_after=self._retry) from err
+            raise UpdateFailed(str(err), retry_after=self._next_retry()) from err
         if found is None:
             return None
         return FirmwareCheck(

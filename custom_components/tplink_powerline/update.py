@@ -76,8 +76,10 @@ class FirmwareUpdate(PowerlineEntity, UpdateEntity):
 
     async def async_update(self) -> None:
         """ "Check for updates" (homeassistant.update_entity): the firmware check, not the
-        adapter's state."""
-        await self.coordinator.firmware.async_request_refresh()
+        adapter's state, run now (not debounced) so the call returns with its answer."""
+        if not self.enabled:
+            return
+        await self.coordinator.firmware.async_refresh()
 
     @property
     def supported_features(self) -> UpdateEntityFeature:
@@ -147,8 +149,11 @@ class FirmwareUpdate(PowerlineEntity, UpdateEntity):
             await wait_for_adapter(seconds)
         finally:
             self._attr_update_percentage = None
+        before = coordinator.data.firmware
         await coordinator.async_request_refresh()
-        await coordinator.firmware.async_request_refresh()
+        if coordinator.data.firmware == before:
+            # New firmware starts its own check (see the coordinator); otherwise check here
+            await coordinator.firmware.async_request_refresh()
 
 
 async def wait_for_adapter(seconds: int) -> None:

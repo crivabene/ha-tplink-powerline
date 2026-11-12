@@ -342,6 +342,9 @@ class EncryptedDevice:
             if self.download_fail:
                 return self._reply(method, url, {"success": True, "data": {"download_fail": True}})
             percent = self.download.pop(0) if len(self.download) > 1 else self.download[0]
+            if percent >= 100:
+                # Writes the firmware and restarts: the session ends without a logout
+                self._logged_in = False
             data = {"percent": str(percent), "download_fail": False}
             return self._reply(method, url, {"success": True, "data": data})
         assert form in ("check_internet", "check_device", "check_connection"), form

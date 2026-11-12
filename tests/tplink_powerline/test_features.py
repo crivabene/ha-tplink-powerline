@@ -10,6 +10,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.setup import async_setup_component
 import pytest
+from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMockResponse
 
 from custom_components.tplink_powerline.api import (
     EncryptedClient,
@@ -243,8 +244,8 @@ async def test_online_upgrade(hass, encrypted_entry_factory, encrypted_device, f
         patch("custom_components.tplink_powerline.update.wait_for_adapter", adapter_upgrades),
     ):
         await call(hass, "update", "install", firmware)
-    # upgrade_time + reboot_time as the adapter announced them
-    assert waited == [(180, True, None)]
+    # upgrade_time + reboot_time as the adapter announced them, plus a margin
+    assert waited == [(240, True, None)]
     assert cloud_requests(encrypted_device)[:8] == [
         ("/admin/cloud_account?form=cloud_upgrade", {"operation": "read"}),
         ("/admin/cloud_account?form=check_internet", {"operation": "read"}),
@@ -255,7 +256,8 @@ async def test_online_upgrade(hass, encrypted_entry_factory, encrypted_device, f
         ("/admin/cloud_account?form=detect_upgrade_status", {"operation": "read"}),
         ("/admin/cloud_account?form=detect_upgrade_status", {"operation": "read"}),
     ]
-    assert encrypted_device.logouts == encrypted_device.logins
+    # No logout while it writes the firmware: the restart ends that session
+    assert encrypted_device.logouts == encrypted_device.logins - 1
     await hass.async_block_till_done()
     state = hass.states.get(firmware)
     assert state.attributes[ATTR_IN_PROGRESS] is False
@@ -386,7 +388,7 @@ async def test_nothing_reaches_the_adapter_while_it_writes_firmware(
     client = encrypted_client(hass)
     firmware = "1.1.0 Build 20250826 Rel.50806"
     with patch("custom_components.tplink_powerline.api.DOWNLOAD_POLL", 0):
-        assert await client.install_firmware(firmware, lambda _p: None) == 180
+        assert await client.install_firmware(firmware, lambda _p: None) == 240
     sent = len(encrypted_device.requests)
     # A restart or a poll queued meanwhile: refused without a single request
     with pytest.raises(PowerlineUpgradingError):
@@ -394,7 +396,7 @@ async def test_nothing_reaches_the_adapter_while_it_writes_firmware(
     with pytest.raises(PowerlineUpgradingError):
         await client.state()
     assert len(encrypted_device.requests) == sent
-    freezer.tick(timedelta(seconds=181))
+    freezer.tick(timedelta(seconds=241))
     assert (await client.state()).firmware == firmware
 
 
@@ -476,11 +478,11 @@ async def test_failed_firmware_check_is_retried_soon(
     hass, encrypted_entry_factory, encrypted_device, advance
 ):
     encrypted_device.firmware_1_1()
-    encrypted_device.fail_on["/admin/cloud_account?form=check_internet"] = "no internet"
+    encrypted_device.fail_on["/admin/cloud_account?form=cloud_upgrade"] = "cloud error"
     await encrypted_entry_factory()
     await hass.async_block_till_done(wait_background_tasks=True)
     assert entity_id(hass, "update", f"{ENC}_firmware") is None
-    del encrypted_device.fail_on["/admin/cloud_account?form=check_internet"]
+    del encrypted_device.fail_on["/admin/cloud_account?form=cloud_upgrade"]
     await advance(timedelta(minutes=16))
     assert hass.states.get(entity_id(hass, "update", f"{ENC}_firmware")).state == STATE_ON
 
@@ -496,3 +498,143 @@ async def test_check_for_updates_reruns_the_firmware_check(
     await async_setup_component(hass, "homeassistant", {})
     await call(hass, "homeassistant", "update_entity", firmware)
     assert hass.states.get(firmware).attributes["latest_version"] == "1.2.0 Build 20260601"
+
+
+# --- Second review fixes --------------------------------------------------------------
+
+
+async def test_new_firmware_is_checked_with_the_new_version(
+    hass, encrypted_entry_factory, encrypted_device, next_poll
+):
+    await encrypted_entry_factory()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert entity_id(hass, "update", f"{ENC}_firmware") is None
+    # Upgraded to 1.1.0 on the web page: the next poll sees it and checks right away
+    encrypted_device.firmware_1_1()
+    await next_poll()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    state = hass.states.get(entity_id(hass, "update", f"{ENC}_firmware"))
+    assert state.attributes["installed_version"] == "1.1.0 Build 20250826"
+
+
+async def test_failed_check_does_not_stop_the_firmware_check(hass, encrypted_device):
+    encrypted_device.firmware_1_1()
+    encrypted_device.fail_on["/admin/cloud_account?form=check_device"] = "not bound"
+    info = await encrypted_client(hass).firmware_info("1.1.0 Build 20250826")
+    assert info.latest == "1.1.1 Build 20260301 Rel.12345"
+
+
+async def test_lost_download_still_protects_the_adapter(hass, encrypted_device, freezer):
+    encrypted_device.firmware_1_1()
+    original = encrypted_device._cloud
+
+    def status_lost(method, url, path, params):
+        if path.endswith("detect_upgrade_status"):
+            return encrypted_device._reply(method, url, {"success": False, "errorcode": "x"})
+        return original(method, url, path, params)
+
+    encrypted_device._cloud = status_lost
+    client = encrypted_client(hass)
+    with (
+        patch("custom_components.tplink_powerline.api.DOWNLOAD_POLL", 0),
+        pytest.raises(PowerlineError),
+    ):
+        await client.install_firmware("1.1.0 Build 20250826", lambda _p: None)
+    # The adapter accepted the upgrade and may be writing: left alone all the same
+    with pytest.raises(PowerlineUpgradingError):
+        await client.state()
+
+
+async def test_reported_download_failure_leaves_the_adapter_usable(hass, encrypted_device):
+    encrypted_device.firmware_1_1()
+    encrypted_device.download_fail = True
+    client = encrypted_client(hass)
+    with (
+        patch("custom_components.tplink_powerline.api.DOWNLOAD_POLL", 0),
+        pytest.raises(PowerlineError, match="could not download"),
+    ):
+        await client.install_firmware("1.1.0 Build 20250826", lambda _p: None)
+    assert (await client.state()).firmware.startswith("1.1.0")
+
+
+async def test_no_logout_while_the_adapter_writes_firmware(hass, encrypted_device):
+    encrypted_device.firmware_1_1()
+    with patch("custom_components.tplink_powerline.api.DOWNLOAD_POLL", 0):
+        await encrypted_client(hass).install_firmware("1.1.0 Build 20250826", lambda _p: None)
+    assert encrypted_device.logouts == encrypted_device.logins - 1
+
+
+async def test_no_upgrade_when_already_up_to_date(hass, encrypted_device):
+    encrypted_device.firmware_1_1()
+    encrypted_device.cloud_data |= {"latest_flag": True}
+    with pytest.raises(PowerlineError, match="latest firmware"):
+        await encrypted_client(hass).install_firmware("1.1.0 Build 20250826", lambda _p: None)
+    assert not [w for w in encrypted_device.writes if w[1].get("operation") == "upgrade"]
+
+
+@pytest.mark.parametrize("flag", [2, -1, "fail", "true"])
+async def test_download_failure_codes(hass, encrypted_device, flag):
+    encrypted_device.firmware_1_1()
+    original = encrypted_device._cloud
+
+    def failing(method, url, path, params):
+        if path.endswith("detect_upgrade_status"):
+            data = {"percent": "10", "download_fail": flag}
+            return encrypted_device._reply(method, url, {"success": True, "data": data})
+        return original(method, url, path, params)
+
+    encrypted_device._cloud = failing
+    with (
+        patch("custom_components.tplink_powerline.api.DOWNLOAD_POLL", 0),
+        pytest.raises(PowerlineError, match="could not download"),
+    ):
+        await encrypted_client(hass).install_firmware("1.1.0 Build 20250826", lambda _p: None)
+
+
+async def test_switches_never_one_way(hass, encrypted_device):
+    # A guest network or a schedule it could not write back unchanged: no switch at all,
+    # rather than one that turns off but never on again
+    encrypted_device.data[GUEST_2G]["guest_2g_psk_version"] = "rsn"
+    encrypted_device.data["schedule"] = [{"shour": "22", "smin": "30", "ehour": "24", "emin": "0"}]
+    state = await encrypted_client(hass).state()
+    assert state.guest_2g is None
+    assert state.night_mode is None
+
+
+async def test_legacy_night_read_http_error_hides_only_night_mode(hass, serve):
+    device = fixtures.LegacyDevice()
+    original = device.__call__
+
+    async def http_error(method, url, data):
+        if "TPLINK.LEDSCHEDULE.ENABLE" in url.query_string:
+            return AiohttpClientMockResponse(method, url, status=500)
+        return await original(method, url, data)
+
+    serve(http_error, fixtures.LEGACY_HOST)
+    client = LegacyClient(async_get_clientsession(hass), fixtures.LEGACY_HOST, fixtures.PASSWORD)
+    state = await client.state()
+    assert state.night_mode is None
+    assert state.led is True
+
+
+async def test_guest_reads_survive_a_missing_wifi_answer(hass, encrypted_device):
+    client = encrypted_client(hass)
+    await client.state()
+    encrypted_device.missing.add("/admin/wlan_status")
+    state = await client.state()
+    assert state.wifi_2g is None
+    assert state.guest_2g is False
+
+
+async def test_firmware_check_backs_off(hass, encrypted_entry_factory, encrypted_device):
+    encrypted_device.firmware_1_1()
+    encrypted_device.fail_on["/admin/cloud_account?form=cloud_upgrade"] = "cloud error"
+    entry = await encrypted_entry_factory()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    firmware = entry.runtime_data.firmware
+    delays = [firmware._next_retry()]
+    for _ in range(7):
+        await firmware.async_refresh()
+        delays.append(firmware._next_retry())
+    assert delays[:4] == [1800, 3600, 7200, 14400]
+    assert delays[-1] == 43200
