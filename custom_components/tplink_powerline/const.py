@@ -17,3 +17,5 @@ CONFIRM_DELAY = 5  # seconds
 CONF_WEBSITE_CHECK = "website_check"
 # Firmware is rarely released: checking twice a day is plenty, adapter and website alike
 FIRMWARE_INTERVAL = timedelta(hours=12)
+# After a failed check (web UI in use, adapter restarting, website down)
+FIRMWARE_RETRY = timedelta(minutes=15)

@@ -65,11 +65,19 @@ class FirmwareUpdate(PowerlineEntity, UpdateEntity):
 
     @property
     def available(self) -> bool:
+        if self.in_progress:
+            # Writing and restarting: the adapter is offline, the install is not
+            return True
         return (
             super().available
             and self.coordinator.firmware.last_update_success
             and self.check is not None
         )
+
+    async def async_update(self) -> None:
+        """ "Check for updates" (homeassistant.update_entity): the firmware check, not the
+        adapter's state."""
+        await self.coordinator.firmware.async_request_refresh()
 
     @property
     def supported_features(self) -> UpdateEntityFeature:

@@ -107,6 +107,18 @@ class PowerlineLockedError(PowerlineAuthError):
     """The web UI is locked after too many wrong passwords."""
 
 
+class PowerlineUpgradingError(PowerlineError):
+    """The adapter is writing new firmware and restarting: nothing is sent meanwhile."""
+
+
+class PowerlineLegacyError(PowerlineError):
+    """The legacy firmware answered with an error code."""
+
+    def __init__(self, message: str, code: int) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class PowerlineRejected(PowerlineError):
     """The adapter answered `success: false` (encrypted family)."""
 
@@ -157,9 +169,6 @@ class FirmwareInfo:
     latest: str | None
     up_to_date: bool
     notes: str | None
-    # Seconds the adapter needs to write the firmware, then to restart
-    upgrade_time: int
-    reboot_time: int
 
 
 @dataclass
@@ -172,6 +181,8 @@ class _Adapter:
     # was refused must not try the same password again
     rejected: set[str] = field(default_factory=set)
     lost_logins: int = 0
+    # Until then the adapter is writing new firmware and restarting: left alone
+    upgrading_until: float = float("-inf")
 
 
 # Per event loop, then per adapter address
@@ -303,6 +314,8 @@ class PowerlineClient:
         async with adapter.lock:
             if self.paused:
                 raise PowerlineError("paused while the adapter is being reconfigured")
+            if time.monotonic() < adapter.upgrading_until:
+                raise PowerlineUpgradingError("the adapter is installing new firmware")
             if not deliberate and self._digest() in adapter.rejected:
                 raise PowerlineAuthError("password rejected earlier")
             try:
@@ -500,11 +513,16 @@ class EncryptedClient(PowerlineClient):
             "/admin/ethernet?form=get_ethernet_status", {"operation": "read"}
         )
         # The LED page: the same endpoint without `enable=toggle` answers for night mode,
-        # and `load` lists its schedule
+        # and `load` lists its schedule. Like the guest pages, it is in every PGW2440
+        # firmware published (1.0.0 to 1.1.0), so a dropped connection still means the
+        # adapter is gone, as for every other read
         night = await self._optional(LED_PATH, {"operation": "read"})
         schedule = await self._optional(LED_PATH, {"operation": "load"})
+        # Guest networks ride on the Wi-Fi bands: not asked of an adapter without Wi-Fi
         guest = {
             band: await self._optional(GUEST_PATH + band, {"operation": "read"})
+            if wlan is not None
+            else None
             for band in GUEST_BANDS
         }
         # With LEDs run by an EasyMesh controller the web UI greys out every LED setting
@@ -580,12 +598,22 @@ class EncryptedClient(PowerlineClient):
         the adapter already holds, written back unchanged."""
 
         async def work() -> None:
-            schedule = await self.request(LED_PATH, {"operation": "load"})
-            await self.request(LED_PATH, {"operation": "write", "enable": "1" if on else "0"})
-            if on:
-                await self.request(
-                    LED_PATH, {"operation": "update"} | encrypted_schedule_fields(schedule)
-                )
+            if not on:
+                await self.request(LED_PATH, {"operation": "write", "enable": "0"})
+                return
+            # Before writing anything: an unreadable schedule is never replaced
+            hours = schedule_numbers(
+                *encrypted_schedule(await self.request(LED_PATH, {"operation": "load"}))
+            )
+            await self.request(LED_PATH, {"operation": "write", "enable": "1"})
+            await self.request(
+                LED_PATH,
+                {"operation": "update"}
+                | {
+                    key: str(value)
+                    for key, value in zip(("shour", "smin", "ehour", "emin"), hours, strict=True)
+                },
+            )
 
         await self._exchange(work)
 
@@ -608,9 +636,13 @@ class EncryptedClient(PowerlineClient):
         """What the firmware page shows when opened; None on firmware without online upgrade."""
         if not self.online_upgrade(firmware):
             return None
-        info = await self._exchange(
-            lambda: self.request(CLOUD_PATH + "cloud_upgrade", {"operation": "read"})
-        )
+
+        async def work() -> Any:
+            # As the page's "Check for upgrades" button: its checks, then the answer
+            await self._cloud_checks()
+            return await self.request(CLOUD_PATH + "cloud_upgrade", {"operation": "read"})
+
+        info = await self._exchange(work)
         if not isinstance(info, dict):
             raise PowerlineError("unexpected online upgrade answer")
         latest = str(info.get("latest_version") or "").strip() or None
@@ -618,9 +650,12 @@ class EncryptedClient(PowerlineClient):
             latest=latest,
             up_to_date=_truthy(info.get("latest_flag")) or latest is None,
             notes=release_notes(info.get("detail")),
-            upgrade_time=_seconds(info.get("upgrade_time"), DEFAULT_UPGRADE_TIME),
-            reboot_time=_seconds(info.get("reboot_time"), DEFAULT_REBOOT_TIME),
         )
+
+    async def _cloud_checks(self) -> None:
+        """The checks the firmware page runs first, in its order, each one fatal."""
+        for check in ("check_internet", "check_device", "check_connection"):
+            await self.request(CLOUD_PATH + check, {"operation": "read"})
 
     async def install_firmware(self, firmware: str | None, progress: Callable[[int], None]) -> int:
         """The firmware page's online upgrade: the adapter downloads the firmware from
@@ -630,15 +665,20 @@ class EncryptedClient(PowerlineClient):
             raise PowerlineError("this firmware cannot upgrade itself online")
 
         async def work() -> int:
+            # Everything is read and checked before the adapter is told to upgrade
             info = await self.request(CLOUD_PATH + "cloud_upgrade", {"operation": "read"})
-            # The checks the web UI runs first, in its order, each one fatal
-            for check in ("check_internet", "check_device", "check_connection"):
-                await self.request(CLOUD_PATH + check, {"operation": "read"})
-            await self.request(CLOUD_PATH + "cloud_upgrade", {"operation": "upgrade"})
-            await self._follow_download(progress)
-            return _seconds(info.get("upgrade_time"), DEFAULT_UPGRADE_TIME) + _seconds(
+            if not isinstance(info, dict):
+                raise PowerlineError("unexpected online upgrade answer")
+            seconds = _seconds(info.get("upgrade_time"), DEFAULT_UPGRADE_TIME) + _seconds(
                 info.get("reboot_time"), DEFAULT_REBOOT_TIME
             )
+            await self._cloud_checks()
+            await self.request(CLOUD_PATH + "cloud_upgrade", {"operation": "upgrade"})
+            await self._follow_download(progress)
+            # From here the adapter writes the firmware: nothing else may reach it, not
+            # even a command or a poll that queued behind this exchange
+            _adapter(self._base).upgrading_until = time.monotonic() + seconds
+            return seconds
 
         return await self._exchange(work)
 
@@ -661,7 +701,7 @@ class EncryptedClient(PowerlineClient):
             failures = 0
             if not isinstance(status, dict):
                 raise PowerlineError("unexpected download status")
-            if status.get("download_fail"):
+            if _truthy(status.get("download_fail")):
                 raise PowerlineError("the adapter could not download the firmware")
             percent = int(status.get("percent", 0))
             progress(max(0, min(percent, 100)))
@@ -726,17 +766,13 @@ def encrypted_schedule(schedule: Any) -> tuple[str | None, str | None]:
     )
 
 
-def encrypted_schedule_fields(schedule: Any) -> dict[str, str]:
-    """The fields the LED page posts with `update`: the schedule it loaded, as integers."""
-    start, end = encrypted_schedule(schedule)
-    # The web UI's defaults for a schedule it could not read
-    start, end = start or "00:00", end or "00:00"
-    return {
-        "shour": str(int(start[:2])),
-        "smin": str(int(start[3:])),
-        "ehour": str(int(end[:2])),
-        "emin": str(int(end[3:])),
-    }
+def schedule_numbers(start: str | None, end: str | None) -> tuple[int, int, int, int]:
+    """(start hour, start minute, end hour, end minute) of a night mode schedule, as the LED
+    pages post them. Refuses a schedule it could not read: writing anything else would
+    replace the one set on the web page."""
+    if start is None or end is None:
+        raise PowerlineError("cannot read the night mode schedule: set it on the web page")
+    return int(start[:2]), int(start[3:]), int(end[:2]), int(end[3:])
 
 
 def guest_state(values: Any, band: str) -> bool | None:
@@ -758,7 +794,12 @@ def guest_settings(current: dict[str, Any], band: str, on: bool) -> dict[str, st
     if encryption not in ("none", "psk"):
         # Writing back a security mode the page does not know could break the network
         raise PowerlineError(f"unsupported guest network security {encryption!r}")
-    sae = encryption == "psk" and "sae" in str(current.get(prefix + "psk_version", ""))
+    # The page offers WPA/WPA2 ("auto") and WPA2/WPA3 ("saeAuto") and writes one of the two
+    # whatever is stored: another stored version would be changed, so it is not touched
+    version = current.get(prefix + "psk_version")
+    if encryption == "psk" and version not in ("auto", "saeAuto"):
+        raise PowerlineError(f"unsupported guest network security version {version!r}")
+    sae = encryption == "psk" and version == "saeAuto"
     settings = {
         "enable": "on",
         "ssid": current.get(prefix + "ssid"),
@@ -825,6 +866,8 @@ class LegacyClient(PowerlineClient):
     # Login answers that are not about the password
     BUSY = (4, 8)
     TRANSIENT = (9, 10)
+    # Answers about the session or the adapter, not about the keys asked
+    SESSION = (3, 4, 5, 8, 9, 10)
 
     def __init__(self, session: aiohttp.ClientSession, host: str, password: str) -> None:
         super().__init__(session, host, password)
@@ -852,7 +895,7 @@ class LegacyClient(PowerlineClient):
     def _check(self, text: str) -> dict[str, str]:
         code, values = self.parse(text)
         if code:
-            raise PowerlineError(self.ERRORS.get(code, f"error {code}"))
+            raise PowerlineLegacyError(self.ERRORS.get(code, f"error {code}"), code)
         return values
 
     async def _call(self, method: str, query: str = "", body: dict | None = None) -> dict[str, str]:
@@ -929,9 +972,9 @@ class LegacyClient(PowerlineClient):
         connection still fails it: the adapter is unreachable or restarting."""
         try:
             return await self.read(*keys)
-        except PowerlineConnectionError:
-            raise
-        except PowerlineError as err:
+        except PowerlineLegacyError as err:
+            if err.code in self.SESSION:
+                raise  # the whole poll fails, not just this read
             _LOGGER.debug("%s not available: %s", keys[0], err)
             return None
 
@@ -942,23 +985,17 @@ class LegacyClient(PowerlineClient):
 
     async def set_night_mode(self, on: bool) -> None:
         """As the LED page saves night mode: the flag alone to turn it off; to turn it on,
-        the flag with the schedule the adapter already holds, as integers."""
+        the flag with the schedule the adapter already holds, unchanged, as integers."""
 
         async def work() -> None:
             if not on:
                 await self.write({"TPLINK.LEDSCHEDULE.ENABLE": "NO"})
                 return
-            start, end = legacy_schedule(await self.read(*LEGACY_NIGHT))
-            # The web UI's defaults for a schedule it could not read
-            start, end = start or "00:00", end or "00:00"
+            # Before writing anything: an unreadable schedule is never replaced
+            hours = schedule_numbers(*legacy_schedule(await self.read(*LEGACY_NIGHT)))
             await self.write(
-                {
-                    "TPLINK.LEDSCHEDULE.ENABLE": "YES",
-                    "TPLINK.LEDSCHEDULE.START_HOUR": str(int(start[:2])),
-                    "TPLINK.LEDSCHEDULE.START_MINUTE": str(int(start[3:])),
-                    "TPLINK.LEDSCHEDULE.END_HOUR": str(int(end[:2])),
-                    "TPLINK.LEDSCHEDULE.END_MINUTE": str(int(end[3:])),
-                }
+                {"TPLINK.LEDSCHEDULE.ENABLE": "YES"}
+                | {key: str(value) for key, value in zip(LEGACY_NIGHT[1:], hours, strict=True)}
             )
 
         await self._exchange(work)
