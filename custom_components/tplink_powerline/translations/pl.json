@@ -40,6 +40,20 @@
       "wrong_device": "Ten adres należy do innego adaptera."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Aktualizacje oprogramowania",
+        "description": "Adaptery z aktualizacją online (PGW2440 z oprogramowaniem 1.1.0 lub nowszym) same sprawdzają nowe oprogramowanie. Dla pozostałych Home Assistant może sprawdzić stronę TP-Link.",
+        "data": {
+          "website_check": "Sprawdzaj nowe oprogramowanie na stronie TP-Link"
+        },
+        "data_description": {
+          "website_check": "Dwa razy dziennie Home Assistant odczytuje stronę pobierania modelu adaptera na tp-link.com. Tylko informuje o nowym oprogramowaniu: zainstaluj je przez stronę WWW adaptera lub narzędzie tpPLC."
+        }
+      }
+    }
+  },
   "entity": {
     "binary_sensor": {
       "powerline": {
@@ -80,6 +94,20 @@
       },
       "wifi_5g": {
         "name": "Wi-Fi 5 GHz"
+      },
+      "night_mode": {
+        "name": "Tryb nocny diod LED"
+      },
+      "guest_2g": {
+        "name": "Wi-Fi dla gości 2,4 GHz"
+      },
+      "guest_5g": {
+        "name": "Wi-Fi dla gości 5 GHz"
+      }
+    },
+    "update": {
+      "firmware": {
+        "name": "Oprogramowanie"
       }
     }
   },
@@ -89,6 +117,9 @@
     },
     "auth_failed": {
       "message": "Adapter odrzucił hasło: wpisz aktualne w prośbie o ponowne uwierzytelnienie."
+    },
+    "install_not_supported": {
+      "message": "Ten adapter nie potrafi sam zainstalować oprogramowania: zaktualizuj go przez jego stronę WWW."
     }
   }
 }

@@ -40,6 +40,20 @@
       "wrong_device": "Diese Adresse gehört zu einem anderen Adapter."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Firmware-Updates",
+        "description": "Adapter mit Online-Upgrade (PGW2440 ab Firmware 1.1.0) suchen selbst nach neuer Firmware. Für die anderen kann Home Assistant auf der TP-Link-Website nachsehen.",
+        "data": {
+          "website_check": "Auf der TP-Link-Website nach neuer Firmware suchen"
+        },
+        "data_description": {
+          "website_check": "Zweimal täglich liest Home Assistant die Download-Seite des Adaptermodells auf tp-link.com. Neue Firmware wird nur gemeldet: installiere sie über die Weboberfläche des Adapters oder das tpPLC-Utility."
+        }
+      }
+    }
+  },
   "entity": {
     "binary_sensor": {
       "powerline": {
@@ -80,6 +94,20 @@
       },
       "wifi_5g": {
         "name": "WLAN 5 GHz"
+      },
+      "night_mode": {
+        "name": "LED-Nachtmodus"
+      },
+      "guest_2g": {
+        "name": "Gast-WLAN 2,4 GHz"
+      },
+      "guest_5g": {
+        "name": "Gast-WLAN 5 GHz"
+      }
+    },
+    "update": {
+      "firmware": {
+        "name": "Firmware"
       }
     }
   },
@@ -89,6 +117,9 @@
     },
     "auth_failed": {
       "message": "Der Adapter hat das Passwort abgelehnt: Gib das aktuelle in der Aufforderung zur erneuten Authentifizierung ein."
+    },
+    "install_not_supported": {
+      "message": "Dieser Adapter kann Firmware nicht selbst installieren: aktualisiere ihn über seine Weboberfläche."
     }
   }
 }

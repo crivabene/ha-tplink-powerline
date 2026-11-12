@@ -17,10 +17,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from collections.abc import Callable
 from dataclasses import dataclass, field
 import hashlib
 import json
 import logging
+import re
 import secrets
 import string
 import time
@@ -51,6 +53,30 @@ MAX_LOST_LOGINS = 3
 # Legacy firmware reports link rates in 1/32 Mbit/s
 LEGACY_RATE_DIVISOR = 32
 NO_PEER = "00:00:00:00:00:00"
+# Online upgrade: the web UI polls the download every second and gives up after 15 failed
+# polls in a row; the overall cap is ours, so a stuck download never holds the adapter
+DOWNLOAD_POLL = 1.0  # seconds
+DOWNLOAD_MAX_FAILURES = 15
+DOWNLOAD_TIMEOUT = 900  # seconds
+# Defaults when the adapter does not say how long writing the firmware and restarting take
+DEFAULT_UPGRADE_TIME = 150
+DEFAULT_REBOOT_TIME = 60
+# Encrypted firmware endpoints
+LED_PATH = "/admin/ledSettings?form=enable"
+GUEST_PATH = "/admin/guest?form=guest_"
+GUEST_BANDS = ("2g", "5g")
+CLOUD_PATH = "/admin/cloud_account?form="
+# First encrypted firmware whose firmware page has the online upgrade (PGW2440 1.1.0)
+ONLINE_UPGRADE_SINCE = (1, 1, 0)
+VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)\s+Build\s+(\d{8})")
+# Legacy night mode keys, read together as the LED page does
+LEGACY_NIGHT = (
+    "TPLINK.LEDSCHEDULE.ENABLE",
+    "TPLINK.LEDSCHEDULE.START_HOUR",
+    "TPLINK.LEDSCHEDULE.START_MINUTE",
+    "TPLINK.LEDSCHEDULE.END_HOUR",
+    "TPLINK.LEDSCHEDULE.END_MINUTE",
+)
 
 
 class PowerlineError(Exception):
@@ -101,8 +127,9 @@ class Peer:
 
 @dataclass
 class PowerlineState:
-    """Everything read from one adapter. Wi-Fi fields stay None when the adapter has none,
-    or when its answer for them could not be read this time."""
+    """Everything read from one adapter. Optional fields stay None when the adapter lacks
+    the feature, when it cannot be changed right now (e.g. LEDs run by an EasyMesh
+    controller), or when its answer could not be read this time."""
 
     mac: str
     model: str
@@ -115,6 +142,24 @@ class PowerlineState:
     wifi_5g: bool | None = None
     wifi_clients: list[dict[str, str]] | None = None
     ethernet: list[dict[str, Any]] | None = None
+    # LEDs off between `night_start` and `night_end` ("HH:MM", adapter's local time)
+    night_mode: bool | None = None
+    night_start: str | None = None
+    night_end: str | None = None
+    guest_2g: bool | None = None
+    guest_5g: bool | None = None
+
+
+@dataclass(frozen=True)
+class FirmwareInfo:
+    """What the adapter's own online upgrade check reports (encrypted firmware 1.1.0+)."""
+
+    latest: str | None
+    up_to_date: bool
+    notes: str | None
+    # Seconds the adapter needs to write the firmware, then to restart
+    upgrade_time: int
+    reboot_time: int
 
 
 @dataclass
@@ -298,6 +343,23 @@ class PowerlineClient:
     async def set_wifi(self, band: str, on: bool) -> None:
         raise PowerlineError("this adapter has no Wi-Fi")
 
+    async def set_night_mode(self, on: bool) -> None:
+        raise NotImplementedError
+
+    async def set_guest(self, band: str, on: bool) -> None:
+        raise PowerlineError("this adapter has no guest network")
+
+    def online_upgrade(self, firmware: str | None) -> bool:
+        """Whether the firmware page of this firmware version has an online upgrade."""
+        return False
+
+    async def firmware_info(self, firmware: str | None) -> FirmwareInfo | None:
+        """The adapter's own online upgrade check; None when its firmware has none."""
+        return None
+
+    async def install_firmware(self, firmware: str | None, progress: Callable[[int], None]) -> int:
+        raise PowerlineError("this adapter cannot upgrade itself online")
+
 
 class EncryptedClient(PowerlineClient):
     """PGW2440-style firmware: AES-CBC data signed with the adapter's RSA key."""
@@ -431,14 +493,23 @@ class EncryptedClient(PowerlineClient):
             "/admin/firmware?form=get_firmware_info", {"operation": "read"}
         )
         peers = await self.request("/admin/powerline?form=plc_device", {"operation": "load"})
-        led = await self.request(
-            "/admin/ledSettings?form=enable", {"operation": "read", "enable": "toggle"}
-        )
+        led = await self.request(LED_PATH, {"operation": "read", "enable": "toggle"})
         wlan = await self._optional("/admin/wlan_status", {"operation": "read"})
         clients = await self._optional("/admin/wireless?form=statistics", {"operation": "load"})
         ethernet = await self._optional(
             "/admin/ethernet?form=get_ethernet_status", {"operation": "read"}
         )
+        # The LED page: the same endpoint without `enable=toggle` answers for night mode,
+        # and `load` lists its schedule
+        night = await self._optional(LED_PATH, {"operation": "read"})
+        schedule = await self._optional(LED_PATH, {"operation": "load"})
+        guest = {
+            band: await self._optional(GUEST_PATH + band, {"operation": "read"})
+            for band in GUEST_BANDS
+        }
+        # With LEDs run by an EasyMesh controller the web UI greys out every LED setting
+        led_free = led.get("module_enable") != "off"
+        start, end = encrypted_schedule(schedule)
         return PowerlineState(
             mac=normalize_mac(settings["mac"]),
             model=firmware.get("model") or "PGW",
@@ -450,7 +521,12 @@ class EncryptedClient(PowerlineClient):
                 for p in peers or []
                 if p.get("status", "on") == "on"
             ],
-            led=str(led.get("enable")) == "1",
+            led=str(led.get("enable")) == "1" if led_free else None,
+            night_mode=_flag(night, "enable") if led_free else None,
+            night_start=start,
+            night_end=end,
+            guest_2g=guest_state(guest["2g"], "2g"),
+            guest_5g=guest_state(guest["5g"], "5g"),
             wifi_2g=_on(wlan, "wireless_2g_enable"),
             wifi_5g=_on(wlan, "wireless_5g_enable"),
             wifi_clients=[
@@ -479,7 +555,7 @@ class EncryptedClient(PowerlineClient):
     async def set_led(self, on: bool) -> None:
         await self._exchange(
             lambda: self.request(
-                "/admin/ledSettings?form=enable",
+                LED_PATH,
                 {"operation": "write", "enable": "toggle", "toggle": "on" if on else "off"},
             )
         )
@@ -499,11 +575,209 @@ class EncryptedClient(PowerlineClient):
 
         await self._exchange(work)
 
+    async def set_night_mode(self, on: bool) -> None:
+        """As the LED page's night mode box: the flag, then (turning it on) the schedule
+        the adapter already holds, written back unchanged."""
+
+        async def work() -> None:
+            schedule = await self.request(LED_PATH, {"operation": "load"})
+            await self.request(LED_PATH, {"operation": "write", "enable": "1" if on else "0"})
+            if on:
+                await self.request(
+                    LED_PATH, {"operation": "update"} | encrypted_schedule_fields(schedule)
+                )
+
+        await self._exchange(work)
+
+    async def set_guest(self, band: str, on: bool) -> None:
+        """Rewrite the guest network of a band as the web UI does, changing only `enable`."""
+        path = GUEST_PATH + band
+
+        async def work() -> None:
+            current = await self.request(path, {"operation": "read"})
+            await self.request(path, {"operation": "write"} | guest_settings(current, band, on))
+
+        await self._exchange(work)
+
+    def online_upgrade(self, firmware: str | None) -> bool:
+        # Firmware before 1.1.0 has no such page and drops the connection when asked for it
+        version = parse_version(firmware)
+        return version is not None and version[:3] >= ONLINE_UPGRADE_SINCE
+
+    async def firmware_info(self, firmware: str | None) -> FirmwareInfo | None:
+        """What the firmware page shows when opened; None on firmware without online upgrade."""
+        if not self.online_upgrade(firmware):
+            return None
+        info = await self._exchange(
+            lambda: self.request(CLOUD_PATH + "cloud_upgrade", {"operation": "read"})
+        )
+        if not isinstance(info, dict):
+            raise PowerlineError("unexpected online upgrade answer")
+        latest = str(info.get("latest_version") or "").strip() or None
+        return FirmwareInfo(
+            latest=latest,
+            up_to_date=_truthy(info.get("latest_flag")) or latest is None,
+            notes=release_notes(info.get("detail")),
+            upgrade_time=_seconds(info.get("upgrade_time"), DEFAULT_UPGRADE_TIME),
+            reboot_time=_seconds(info.get("reboot_time"), DEFAULT_REBOOT_TIME),
+        )
+
+    async def install_firmware(self, firmware: str | None, progress: Callable[[int], None]) -> int:
+        """The firmware page's online upgrade: the adapter downloads the firmware from
+        TP-Link, checks and writes it, then restarts. Returns the seconds that takes once
+        the download is over. Nothing is ever uploaded from here."""
+        if not self.online_upgrade(firmware):
+            raise PowerlineError("this firmware cannot upgrade itself online")
+
+        async def work() -> int:
+            info = await self.request(CLOUD_PATH + "cloud_upgrade", {"operation": "read"})
+            # The checks the web UI runs first, in its order, each one fatal
+            for check in ("check_internet", "check_device", "check_connection"):
+                await self.request(CLOUD_PATH + check, {"operation": "read"})
+            await self.request(CLOUD_PATH + "cloud_upgrade", {"operation": "upgrade"})
+            await self._follow_download(progress)
+            return _seconds(info.get("upgrade_time"), DEFAULT_UPGRADE_TIME) + _seconds(
+                info.get("reboot_time"), DEFAULT_REBOOT_TIME
+            )
+
+        return await self._exchange(work)
+
+    async def _follow_download(self, progress: Callable[[int], None]) -> None:
+        deadline = time.monotonic() + DOWNLOAD_TIMEOUT
+        failures = 0
+        while True:
+            await asyncio.sleep(DOWNLOAD_POLL)
+            if time.monotonic() > deadline:
+                raise PowerlineError("the firmware download did not finish in time")
+            try:
+                status = await self.request(
+                    CLOUD_PATH + "detect_upgrade_status", {"operation": "read"}
+                )
+            except PowerlineError:
+                failures += 1
+                if failures >= DOWNLOAD_MAX_FAILURES:
+                    raise
+                continue
+            failures = 0
+            if not isinstance(status, dict):
+                raise PowerlineError("unexpected download status")
+            if status.get("download_fail"):
+                raise PowerlineError("the adapter could not download the firmware")
+            percent = int(status.get("percent", 0))
+            progress(max(0, min(percent, 100)))
+            if percent >= 100:
+                return
+
 
 def _on(values: dict | None, key: str) -> bool | None:
     if not values or key not in values:
         return None
     return values[key] == "on"
+
+
+def parse_version(text: str | None) -> tuple[int, int, int, int] | None:
+    """(major, minor, patch, build date) from "1.0.3 Build 20221213 Rel.62540"."""
+    match = VERSION.search(text or "")
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def short_version(text: str | None) -> str | None:
+    """ "1.0.3 Build 20221213" from what an adapter reports; the text itself otherwise."""
+    match = VERSION.search(text or "")
+    return f"{match[1]}.{match[2]}.{match[3]} Build {match[4]}" if match else text
+
+
+def _truthy(value: Any) -> bool:
+    return value is True or str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _flag(values: dict | None, key: str) -> bool | None:
+    """A 1/0 flag (as number or text); None when missing."""
+    if not isinstance(values, dict) or values.get(key) is None:
+        return None
+    return str(values[key]) == "1"
+
+
+def _seconds(value: Any, default: int) -> int:
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError):
+        return default
+    return seconds if seconds > 0 else default
+
+
+def _hhmm(hour: Any, minute: Any) -> str | None:
+    try:
+        hour, minute = int(hour), int(minute)
+    except (TypeError, ValueError):
+        return None
+    if not (0 <= hour < 24 and 0 <= minute < 60):
+        return None
+    return f"{hour:02d}:{minute:02d}"
+
+
+def encrypted_schedule(schedule: Any) -> tuple[str | None, str | None]:
+    """(start, end) of the night mode from the LED page's `load` answer."""
+    if not isinstance(schedule, list) or not schedule or not isinstance(schedule[0], dict):
+        return None, None
+    entry = schedule[0]
+    return _hhmm(entry.get("shour"), entry.get("smin")), _hhmm(
+        entry.get("ehour"), entry.get("emin")
+    )
+
+
+def encrypted_schedule_fields(schedule: Any) -> dict[str, str]:
+    """The fields the LED page posts with `update`: the schedule it loaded, as integers."""
+    start, end = encrypted_schedule(schedule)
+    # The web UI's defaults for a schedule it could not read
+    start, end = start or "00:00", end or "00:00"
+    return {
+        "shour": str(int(start[:2])),
+        "smin": str(int(start[3:])),
+        "ehour": str(int(end[:2])),
+        "emin": str(int(end[3:])),
+    }
+
+
+def guest_state(values: Any, band: str) -> bool | None:
+    """Guest network of a band; None when unknown or greyed out (`disabled`: the host band
+    is off)."""
+    if not isinstance(values, dict) or f"guest_{band}_enable" not in values:
+        return None
+    if values.get(f"guest_{band}_disabled") == "on":
+        return None
+    return values[f"guest_{band}_enable"] == "on"
+
+
+def guest_settings(current: dict[str, Any], band: str, on: bool) -> dict[str, str]:
+    """The fields the guest network page posts for a band (its `serialize`)."""
+    if not on:
+        return {"enable": "off"}
+    prefix = f"guest_{band}_"
+    encryption = current.get(prefix + "encryption")
+    if encryption not in ("none", "psk"):
+        # Writing back a security mode the page does not know could break the network
+        raise PowerlineError(f"unsupported guest network security {encryption!r}")
+    sae = encryption == "psk" and "sae" in str(current.get(prefix + "psk_version", ""))
+    settings = {
+        "enable": "on",
+        "ssid": current.get(prefix + "ssid"),
+        "hidden": current.get(prefix + "hidden"),
+        "encryption": encryption,
+        "psk_key": current.get(prefix + "psk_key"),
+        "psk_version": "saeAuto" if sae else "auto",
+    }
+    if not settings["ssid"]:
+        raise PowerlineError("the guest network has no name yet: set it up in the web UI first")
+    return {key: str(value) for key, value in settings.items() if value is not None}
+
+
+def release_notes(detail: Any) -> str | None:
+    """The firmware page's "What's new" text: escaped tabs, quotes and line breaks."""
+    if not isinstance(detail, str) or not detail.strip():
+        return None
+    text = detail.replace("\\t", " ").replace("\\'", "'").replace("\\n", "\n")
+    return text.strip() or None
 
 
 async def _restarting(request) -> None:
@@ -632,7 +906,9 @@ class LegacyClient(PowerlineClient):
             "DIDMNG.GENERAL.MACS", "DIDMNG.GENERAL.RX_BPS", "DIDMNG.GENERAL.TX_BPS"
         )
         led = await self.read("TPLINK.LEDSCHEDULE.LED_ENABLE")
+        night = await self._optional_read(*LEGACY_NIGHT)
         mac = normalize_mac(node["SYSTEM.PRODUCTION.MAC_ADDR"])
+        start, end = legacy_schedule(night)
         return PowerlineState(
             mac=mac,
             model=system.get("SYSTEM.PRODUCTION.HW_PRODUCT") or "PG",
@@ -641,15 +917,66 @@ class LegacyClient(PowerlineClient):
             name=node.get("NODE.GENERAL.DEVICE_NAME"),
             peers=legacy_peers(network, mac),
             led=led.get("TPLINK.LEDSCHEDULE.LED_ENABLE") == "YES",
+            night_mode=None
+            if night is None or night.get("TPLINK.LEDSCHEDULE.ENABLE") is None
+            else night["TPLINK.LEDSCHEDULE.ENABLE"] == "YES",
+            night_start=start,
+            night_end=end,
         )
+
+    async def _optional_read(self, *keys: str) -> dict[str, str] | None:
+        """A key group some firmware may lack: None instead of failing the poll. A dropped
+        connection still fails it: the adapter is unreachable or restarting."""
+        try:
+            return await self.read(*keys)
+        except PowerlineConnectionError:
+            raise
+        except PowerlineError as err:
+            _LOGGER.debug("%s not available: %s", keys[0], err)
+            return None
 
     async def set_led(self, on: bool) -> None:
         await self._exchange(
             lambda: self.write({"TPLINK.LEDSCHEDULE.LED_ENABLE": "YES" if on else "NO"})
         )
 
+    async def set_night_mode(self, on: bool) -> None:
+        """As the LED page saves night mode: the flag alone to turn it off; to turn it on,
+        the flag with the schedule the adapter already holds, as integers."""
+
+        async def work() -> None:
+            if not on:
+                await self.write({"TPLINK.LEDSCHEDULE.ENABLE": "NO"})
+                return
+            start, end = legacy_schedule(await self.read(*LEGACY_NIGHT))
+            # The web UI's defaults for a schedule it could not read
+            start, end = start or "00:00", end or "00:00"
+            await self.write(
+                {
+                    "TPLINK.LEDSCHEDULE.ENABLE": "YES",
+                    "TPLINK.LEDSCHEDULE.START_HOUR": str(int(start[:2])),
+                    "TPLINK.LEDSCHEDULE.START_MINUTE": str(int(start[3:])),
+                    "TPLINK.LEDSCHEDULE.END_HOUR": str(int(end[:2])),
+                    "TPLINK.LEDSCHEDULE.END_MINUTE": str(int(end[3:])),
+                }
+            )
+
+        await self._exchange(work)
+
     async def reboot(self) -> None:
         await self._exchange(lambda: _restarting(self.write({"SYSTEM.GENERAL.HW_RESET": "1"})))
+
+
+def legacy_schedule(night: dict[str, str] | None) -> tuple[str | None, str | None]:
+    """(start, end) of the night mode from the LED page's key group."""
+    if not night:
+        return None, None
+    return (
+        _hhmm(
+            night.get("TPLINK.LEDSCHEDULE.START_HOUR"), night.get("TPLINK.LEDSCHEDULE.START_MINUTE")
+        ),
+        _hhmm(night.get("TPLINK.LEDSCHEDULE.END_HOUR"), night.get("TPLINK.LEDSCHEDULE.END_MINUTE")),
+    )
 
 
 def legacy_peers(network: dict[str, str], own_mac: str) -> list[Peer]:

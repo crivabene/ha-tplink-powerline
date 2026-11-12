@@ -1,7 +1,8 @@
 """Fake adapters speaking each firmware's protocol, with values recorded on real devices.
 
 Addresses are anonymised; everything else is what a PGW2440 (fw 1.0.4) and a PG2400P
-(fw 1.0.3) answered.
+(fw 1.0.3) answered. The online upgrade (PGW2440 fw 1.1.0) follows that firmware's web UI:
+no adapter running it was available.
 """
 
 from __future__ import annotations
@@ -43,6 +44,28 @@ ENCRYPTED_DATA = {
         }
     ],
     "/admin/ledSettings?form=enable": {"enable": "1", "module_enable": "on"},
+    # The same endpoint without `enable=toggle` (night mode), and its `load` (schedule)
+    "night": {"enable": "0", "module_enable": "on"},
+    "schedule": [{"shour": "22", "smin": "30", "ehour": "6", "emin": "0"}],
+    "/admin/guest?form=guest_2g": {
+        "guest_2g_enable": "off",
+        "guest_2g_disabled": "off",
+        "guest_2g_ssid": "Home-Guest",
+        "guest_2g_hidden": "off",
+        "guest_2g_encryption": "psk",
+        "guest_2g_psk_key": "guest-secret",
+        "guest_2g_psk_version": "auto",
+    },
+    # Greyed out: the 5 GHz band is off
+    "/admin/guest?form=guest_5g": {
+        "guest_5g_enable": "off",
+        "guest_5g_disabled": "on",
+        "guest_5g_ssid": "Home-Guest-5G",
+        "guest_5g_hidden": "off",
+        "guest_5g_encryption": "none",
+        "guest_5g_psk_key": "",
+        "guest_5g_psk_version": "auto",
+    },
     "/admin/wlan_status": {
         "wireless_2g_enable": "on",
         "wireless_2g_ssid": "Home",
@@ -95,6 +118,26 @@ LEGACY_DATA = {
     "DIDMNG.GENERAL.RX_BPS": "0,3299,0",
     "DIDMNG.GENERAL.TX_BPS": "0,3374,0",
     "TPLINK.LEDSCHEDULE.LED_ENABLE": "YES",
+    "TPLINK.LEDSCHEDULE.ENABLE": "NO",
+    "TPLINK.LEDSCHEDULE.START_HOUR": "2",
+    "TPLINK.LEDSCHEDULE.START_MINUTE": "0",
+    "TPLINK.LEDSCHEDULE.END_HOUR": "4",
+    "TPLINK.LEDSCHEDULE.END_MINUTE": "0",
+}
+LEGACY_NIGHT_GROUP = {
+    "TPLINK.LEDSCHEDULE.ENABLE",
+    "TPLINK.LEDSCHEDULE.START_HOUR",
+    "TPLINK.LEDSCHEDULE.START_MINUTE",
+    "TPLINK.LEDSCHEDULE.END_HOUR",
+    "TPLINK.LEDSCHEDULE.END_MINUTE",
+}
+# What the firmware page of 1.1.0 shows (fields from its web UI, values made up)
+CLOUD_UPGRADE = {
+    "latest_version": "1.1.1 Build 20260301 Rel.12345",
+    "latest_flag": False,
+    "detail": "1. Improved stability.\\n2. Fixed the LED schedule.",
+    "upgrade_time": 120,
+    "reboot_time": 60,
 }
 # Key groups the legacy web UI reads; the device drops any other grouping
 LEGACY_GROUPS = [
@@ -103,6 +146,7 @@ LEGACY_GROUPS = [
     {"DIDMNG.GENERAL.MACS", "DIDMNG.GENERAL.RX_BPS", "DIDMNG.GENERAL.TX_BPS"},
     {"DIDMNG.GENERAL.NUM_DIDS"},
     {"TPLINK.LEDSCHEDULE.LED_ENABLE"},
+    LEGACY_NIGHT_GROUP,
 ]
 
 _RSA_KEY = rsa.generate_private_key(public_exponent=65537, key_size=1024)
@@ -140,8 +184,23 @@ class EncryptedDevice:
         self.restarting = False
         # Forced answer to the next logins, e.g. "exceeded max attempts"
         self.login_error: str | None = None
+        # Firmware 1.1.0: the firmware page's online upgrade. Before it, the adapter drops
+        # the connection on those endpoints (seen on 1.0.4)
+        self.cloud = False
+        self.cloud_data = dict(CLOUD_UPGRADE)
+        # Download progress answered by each status poll, then 100
+        self.download = [0, 40, 100]
+        self.download_fail = False
+        # Every request after login, in order: (path, params)
+        self.requests: list[tuple[str, dict]] = []
         self._aes = EncryptedClient(None, ENCRYPTED_HOST, "")
         self._logged_in = False
+
+    def firmware_1_1(self) -> None:
+        self.cloud = True
+        self.data["/admin/firmware?form=get_firmware_info"]["firmware_version"] = (
+            "1.1.0 Build 20250826 Rel.50806"
+        )
 
     def rsa_decrypt(self, hex_text: str) -> str:
         size = len(self.modulus)
@@ -220,22 +279,73 @@ class EncryptedDevice:
             return self._reply(method, url, {"success": False, "errorcode": self.fail_with})
         if path in self.missing:
             return self._reply(method, url, {"success": False, "errCode": -1})
+        self.requests.append((path, dict(params)))
         if path in self.fail_on:
             return self._reply(method, url, {"success": False, "errorcode": self.fail_on[path]})
+        if path.startswith("/admin/cloud_account"):
+            return self._cloud(method, url, path, params)
         operation = params.pop("operation")
+        if path == "/admin/ledSettings?form=enable":
+            return self._led(method, url, operation, params)
         if operation == "write":
             self.writes.append((path, params))
             if path == "/admin/reboot.json" and self.drop_reboot_answer:
                 self.restarting = True
                 return AiohttpClientMockResponse(method, url, exc=aiohttp.ServerDisconnectedError())
-            if path == "/admin/ledSettings?form=enable":
-                self.data[path]["enable"] = "1" if params["toggle"] == "on" else "0"
+            if path.startswith("/admin/guest?form=guest_"):
+                band = path[-2:]
+                self.data[path][f"guest_{band}_enable"] = params["enable"]
             return self._reply(method, url, {"success": True, "data": self.data.get(path, {})})
         lists = ("/admin/powerline?form=plc_device", "/admin/wireless?form=statistics")
         if path in lists and operation != "load":
             # Lists only answer to `load`
             return self._reply(method, url, {"success": False, "errCode": -1})
         return self._reply(method, url, {"success": True, "data": self.data[path]})
+
+    def _led(self, method, url, operation: str, params: dict) -> AiohttpClientMockResponse:
+        """One endpoint, three settings, told apart as the LED page does."""
+        path = "/admin/ledSettings?form=enable"
+        if operation == "load":
+            data = self.data["schedule"]
+        elif operation == "update":
+            self.writes.append((path, params | {"operation": "update"}))
+            assert set(params) == {"shour", "smin", "ehour", "emin"}
+            self.data["schedule"] = [params]
+            data = params
+        elif operation == "write" and params.get("enable") == "toggle":
+            self.writes.append((path, params))
+            self.data[path]["enable"] = "1" if params["toggle"] == "on" else "0"
+            data = self.data[path]
+        elif operation == "write":
+            self.writes.append((path, params))
+            assert params == {"enable": params["enable"]} and params["enable"] in ("0", "1")
+            self.data["night"]["enable"] = params["enable"]
+            data = self.data["night"]
+        elif params.get("enable") == "toggle":
+            data = self.data[path]
+        else:
+            data = self.data["night"]
+        return self._reply(method, url, {"success": True, "data": data})
+
+    def _cloud(self, method, url, path: str, params: dict) -> AiohttpClientMockResponse:
+        if not self.cloud:
+            return AiohttpClientMockResponse(method, url, exc=aiohttp.ServerDisconnectedError())
+        form = path.split("form=")[1]
+        operation = params["operation"]
+        if form == "cloud_upgrade" and operation == "upgrade":
+            self.writes.append((path, params))
+            return self._reply(method, url, {"success": True})
+        assert operation == "read", f"{form}: {operation}"
+        if form == "cloud_upgrade":
+            return self._reply(method, url, {"success": True, "data": self.cloud_data})
+        if form == "detect_upgrade_status":
+            if self.download_fail:
+                return self._reply(method, url, {"success": True, "data": {"download_fail": True}})
+            percent = self.download.pop(0) if len(self.download) > 1 else self.download[0]
+            data = {"percent": str(percent), "download_fail": False}
+            return self._reply(method, url, {"success": True, "data": data})
+        assert form in ("check_internet", "check_device", "check_connection"), form
+        return self._reply(method, url, {"success": True, "data": {}})
 
 
 class LegacyDevice:
@@ -280,5 +390,8 @@ class LegacyDevice:
             self.token = ""
             return _response(method, url, "ERROR=000\r\nRESULT=0\r\n")
         self.writes.append(form)
+        if form.get("TPLINK.LEDSCHEDULE.ENABLE") == "YES":
+            # The LED page saves night mode with its whole schedule
+            assert set(form) == LEGACY_NIGHT_GROUP, f"night mode without schedule: {form}"
         self.data.update({k: v for k, v in form.items() if k in self.data})
         return _response(method, url, "ERROR=000\r\n")

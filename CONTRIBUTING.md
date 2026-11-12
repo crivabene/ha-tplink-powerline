@@ -14,8 +14,11 @@ grouped differently from the web page, the encrypted firmware resets requests th
 look like a browser's, and both lock their web page after about ten wrong passwords. So this
 integration never guesses a request: it copies one the web page was seen sending.
 
-Some web page actions must never be automated: unpairing an adapter (`plc remove`), factory
-reset, firmware upgrade, password change.
+Some web page actions must never be automated: unpairing an adapter (`plc remove`), pairing,
+factory reset, password change, and **uploading a firmware file**. The only firmware upgrade
+offered is the web page's *online* upgrade (encrypted firmware 1.1.0+), where the adapter
+downloads and checks the firmware itself; requests that firmware page sends are never sent
+to older firmware, which drops the connection on them.
 
 ## Adding an adapter model
 
@@ -52,6 +55,7 @@ diagnostics and the requests you copied.
 
 - `api.py`: `EncryptedClient` and `LegacyClient` hold the requests of each family; `detect`
   tells the families apart with requests that need no login.
+- `website.py`: the optional firmware check on TP-Link's download pages (model → page).
 - `tests/tplink_powerline/fixtures.py`: the fake adapters check the protocol (signatures,
   tokens, key groups). Add your model's answers there, **anonymised** (made-up MAC and IP
   addresses, names and passwords), plus tests asserting the exact requests sent.

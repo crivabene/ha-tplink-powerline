@@ -16,8 +16,10 @@ from homeassistant.config_entries import (
     ConfigEntryState,
     ConfigFlow,
     ConfigFlowResult,
+    OptionsFlowWithReload,
 )
 from homeassistant.const import CONF_HOST, CONF_PASSWORD
+from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import voluptuous as vol
 
@@ -31,16 +33,22 @@ from .api import (
     detect,
     normalize_host,
 )
-from .const import CONF_FAMILY, CONF_REJECTED, DOMAIN
+from .const import CONF_FAMILY, CONF_REJECTED, CONF_WEBSITE_CHECK, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
 CREDENTIALS = vol.Schema({vol.Required(CONF_HOST): str, vol.Required(CONF_PASSWORD): str})
 PASSWORD = vol.Schema({vol.Required(CONF_PASSWORD): str})
+OPTIONS = vol.Schema({vol.Required(CONF_WEBSITE_CHECK, default=False): bool})
 
 
 class PowerlineConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> PowerlineOptionsFlow:
+        return PowerlineOptionsFlow()
 
     @staticmethod
     def _pause(entry: ConfigEntry) -> PowerlineClient | None:
@@ -188,4 +196,16 @@ class PowerlineConfigFlow(ConfigFlow, domain=DOMAIN):
                 {CONF_HOST: user_input[CONF_HOST] if user_input else entry.data[CONF_HOST]},
             ),
             errors={"base": error} if error else {},
+        )
+
+
+class PowerlineOptionsFlow(OptionsFlowWithReload):
+    """Whether to look up new firmware on TP-Link's website (reloads the entry)."""
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self.add_suggested_values_to_schema(OPTIONS, self.config_entry.options),
         )

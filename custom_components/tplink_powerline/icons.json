@@ -52,6 +52,24 @@
         "state": {
           "on": "mdi:wifi"
         }
+      },
+      "night_mode": {
+        "default": "mdi:led-on",
+        "state": {
+          "on": "mdi:weather-night"
+        }
+      },
+      "guest_2g": {
+        "default": "mdi:account-network-off",
+        "state": {
+          "on": "mdi:account-network"
+        }
+      },
+      "guest_5g": {
+        "default": "mdi:account-network-off",
+        "state": {
+          "on": "mdi:account-network"
+        }
       }
     }
   }

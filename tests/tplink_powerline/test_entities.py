@@ -59,6 +59,7 @@ async def test_legacy_has_no_wifi_entities(hass, legacy_entry):
         "adapters",
         "powerline",
         "led",
+        "night_mode",
         "restart",
         f"{fixtures.ENCRYPTED_MAC}_rx",
         f"{fixtures.ENCRYPTED_MAC}_tx",

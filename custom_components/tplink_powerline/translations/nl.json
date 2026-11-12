@@ -40,6 +40,20 @@
       "wrong_device": "Dit adres hoort bij een andere adapter."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Firmware-updates",
+        "description": "Adapters met online upgrade (PGW2440 met firmware 1.1.0 of later) zoeken zelf naar nieuwe firmware. Voor de andere kan Home Assistant op de website van TP-Link kijken.",
+        "data": {
+          "website_check": "Op de website van TP-Link naar nieuwe firmware zoeken"
+        },
+        "data_description": {
+          "website_check": "Twee keer per dag leest Home Assistant de downloadpagina van het adaptermodel op tp-link.com. Nieuwe firmware wordt alleen gemeld: installeer die via de webpagina van de adapter of de tpPLC-utility."
+        }
+      }
+    }
+  },
   "entity": {
     "binary_sensor": {
       "powerline": {
@@ -80,6 +94,20 @@
       },
       "wifi_5g": {
         "name": "Wifi 5 GHz"
+      },
+      "night_mode": {
+        "name": "Nachtmodus leds"
+      },
+      "guest_2g": {
+        "name": "Gast-wifi 2,4 GHz"
+      },
+      "guest_5g": {
+        "name": "Gast-wifi 5 GHz"
+      }
+    },
+    "update": {
+      "firmware": {
+        "name": "Firmware"
       }
     }
   },
@@ -89,6 +117,9 @@
     },
     "auth_failed": {
       "message": "De adapter heeft het wachtwoord geweigerd: voer het huidige in bij het verzoek om opnieuw te verifiëren."
+    },
+    "install_not_supported": {
+      "message": "Deze adapter kan firmware niet zelf installeren: werk hem bij via zijn webpagina."
     }
   }
 }

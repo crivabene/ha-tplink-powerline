@@ -243,8 +243,8 @@ async def test_legacy_requests_are_paced(hass, legacy_device):
         patch("custom_components.tplink_powerline.api.asyncio.sleep") as sleep,
     ):
         await client.state()
-    # login, 4 reads, logout: every request after the first waits, login included
-    assert [call.args[0] for call in sleep.call_args_list] == [0.5] * 5
+    # login, 5 reads, logout: every request after the first waits, login included
+    assert [call.args[0] for call in sleep.call_args_list] == [0.5] * 6
 
 
 async def test_errors_never_carry_the_session_token(hass, aioclient_mock, legacy_device):

@@ -40,6 +40,20 @@
       "wrong_device": "Este endereço pertence a outro adaptador."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Atualizações de firmware",
+        "description": "Os adaptadores com atualização online (PGW2440 com firmware 1.1.0 ou posterior) procuram firmware novo sozinhos. Para os outros, o Home Assistant pode procurá-lo no site da TP-Link.",
+        "data": {
+          "website_check": "Procurar firmware novo no site da TP-Link"
+        },
+        "data_description": {
+          "website_check": "Duas vezes por dia, o Home Assistant lê a página de transferências do modelo em tp-link.com. Só avisa de firmware novo: instale-o pela página web do adaptador ou com o utilitário tpPLC."
+        }
+      }
+    }
+  },
   "entity": {
     "binary_sensor": {
       "powerline": {
@@ -80,6 +94,20 @@
       },
       "wifi_5g": {
         "name": "Wi-Fi 5 GHz"
+      },
+      "night_mode": {
+        "name": "Modo noturno dos LED"
+      },
+      "guest_2g": {
+        "name": "Wi-Fi de convidados 2,4 GHz"
+      },
+      "guest_5g": {
+        "name": "Wi-Fi de convidados 5 GHz"
+      }
+    },
+    "update": {
+      "firmware": {
+        "name": "Firmware"
       }
     }
   },
@@ -89,6 +117,9 @@
     },
     "auth_failed": {
       "message": "O adaptador rejeitou a palavra-passe: introduza a atual no pedido de nova autenticação."
+    },
+    "install_not_supported": {
+      "message": "Este adaptador não consegue instalar o firmware sozinho: atualize-o pela sua página web."
     }
   }
 }

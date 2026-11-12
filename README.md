@@ -1,25 +1,31 @@
 # TP-Link Powerline (G.hn) for Home Assistant
 
 Local integration for TP-Link **G.hn powerline adapters**: the link rate to every other
-adapter, LEDs, restart and, on Wi-Fi models, each Wi-Fi band. It talks to the adapter's own
-web page over the LAN: no cloud, no TP-Link ID, no extra Python packages.
+adapter, LEDs and their night mode, restart, firmware updates and, on Wi-Fi models, each
+Wi-Fi band and guest network. It talks to the adapter's own web page over the LAN: no
+cloud, no TP-Link ID, no extra Python packages.
 
 > Not affiliated with or endorsed by TP-Link. "TP-Link" is a trademark of its owner.
 
 ## Supported adapters
 
-| Model | Firmware tested | Firmware family | Notes |
+| Model | Status | Firmware family | Notes |
 |---|---|---|---|
-| PGW2440 v1.0 | 1.0.4 Build 20240830 | encrypted | Wi-Fi extender model |
-| PG2400P v1.0 | 1.0.3 Build 20221213 | legacy | |
+| PGW2440 v1.0 | tested on 1.0.4 Build 20240830 | encrypted | Wi-Fi extender model, sold in the PGW2440 KIT |
+| PG2400P v1.0 | tested on 1.0.3 Build 20221213 | legacy | sold in the PG2400P KIT and the PGW2440 KIT |
+| PG1200 v1.0 | expected to work | legacy | same web page as the PG2400P in firmware 1.0.0 and 1.1.0 |
+| PG2405P v1.0 | expected to work | legacy | French-plug PG2400P; same web page in firmware 1.1.0 |
+
+These are all of TP-Link's G.hn adapters. "Expected to work" means the model's official
+firmware serves the same web page, with the same requests, as a tested model: if you have
+one, please report whether it works (see [CONTRIBUTING.md](CONTRIBUTING.md)). The 2025
+firmware (1.1.0) of every model keeps the same login and requests.
 
 Two firmware families exist and the integration detects which one an adapter runs:
 
 - **encrypted**: the TP-Link router-style web UI (requests are AES-encrypted and RSA-signed);
 - **legacy**: an older web UI over the G.hn data model (`DIDMNG.GENERAL.MACS`, ...).
 
-Other G.hn models (PG2400, PGW2440 kits, PG1200, ...) probably use one of the two. If yours
-works, or does not, please open an issue with the model, hardware and firmware version.
 HomePlug AV adapters (TL-PA...) speak another protocol and are not supported.
 
 ## Installation
@@ -53,6 +59,9 @@ enter:
 Add each adapter on its own: every adapter only knows its own settings. The address and the
 password can be changed later with *Reconfigure*.
 
+**Options** (*Configure* on the adapter's entry): *Check TP-Link's website for new
+firmware*, off by default. See [Firmware updates](#firmware-updates).
+
 ## Entities
 
 | Entity | Type | Models | Notes |
@@ -61,9 +70,12 @@ password can be changed later with *Reconfigure*.
 | Transmit rate to *peer* | sensor | all | Mbit/s |
 | Connected adapters | sensor | all | other adapters seen over the mains |
 | Powerline link | binary sensor | all | on while at least one other adapter is reachable |
-| LEDs | switch | all | |
+| LEDs | switch | all | unavailable while an EasyMesh controller runs the LEDs |
+| LED night mode | switch | all | LEDs off every night; the schedule (set on the web page) as `start` and `end` attributes. With the factory schedule 00:00–00:00 the LEDs stay off all day |
 | Restart | button | all | the powerline link drops for about a minute |
+| Firmware | update | see [Firmware updates](#firmware-updates) | |
 | Wi-Fi 2.4 GHz / 5 GHz | switch | Wi-Fi models | turning a band off disconnects its clients |
+| Guest Wi-Fi 2.4 GHz / 5 GHz | switch | Wi-Fi models | the guest network as set up on the web page; unavailable while its band is off |
 | Wi-Fi clients | sensor | Wi-Fi models | |
 | Ethernet | binary sensor | models that report it (PGW2440) | link state; speed and duplex as attributes |
 
@@ -142,7 +154,11 @@ card editor. On an adapter without Wi-Fi, drop the two Wi-Fi tiles.
 | `switch.garage_wi_fi_2_4_ghz` | `switch.garage_wi_fi_24_ghz` |
 | `switch.garage_wi_fi_5_ghz` | `switch.garage_wi_fi_5_ghz` |
 | `switch.garage_leds` | `switch.garage_led` |
+| `switch.garage_led_night_mode` | `switch.garage_modalita_notte_led` |
+| `switch.garage_guest_wi_fi_2_4_ghz` | `switch.garage_wi_fi_ospiti_24_ghz` |
+| `switch.garage_guest_wi_fi_5_ghz` | `switch.garage_wi_fi_ospiti_5_ghz` |
 | `button.garage_restart` | `button.garage_riavvia` |
+| `update.garage_firmware` | `update.garage_firmware` |
 
 ## How it behaves
 
@@ -157,8 +173,27 @@ card editor. On an adapter without Wi-Fi, drop the two Wi-Fi tiles.
   (re-authentication) instead of retrying. Three logins in a row left unanswered by an
   adapter that answers everything else are treated the same way, since each may have
   counted as a wrong attempt.
-- **Wi-Fi switches** rewrite the band settings exactly as the web page does, changing only
-  the on/off flag.
+- **Wi-Fi, guest network and night mode switches** rewrite the settings exactly as the web
+  page does, changing only the on/off flag: names, passwords and schedules are left as set
+  on the web page.
+
+## Firmware updates
+
+The *Firmware* entity appears when the integration has a way to know the latest firmware:
+
+- **PGW2440 with firmware 1.1.0 or later**: the adapter checks TP-Link's servers itself, as
+  the *Check for upgrades* button of its web page does, twice a day. The entity shows the
+  release notes and can **install** the update: the adapter downloads the firmware from
+  TP-Link, checks it, writes it and restarts (a few minutes, offline meanwhile). Nothing is
+  ever uploaded from Home Assistant. Note that TP-Link does not allow going back from 1.1.0
+  to an earlier firmware.
+- **Other adapters and firmware** have no such check. With the option *Check TP-Link's
+  website for new firmware* on, Home Assistant reads the model's download page on
+  tp-link.com twice a day and reports newer firmware there, as a notice with a link:
+  install it from the adapter's web page or with the tpPLC utility.
+
+The integration never uploads a firmware file to an adapter: a wrong or interrupted upload
+can leave it unusable.
 
 ## Languages
 
